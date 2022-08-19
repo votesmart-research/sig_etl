@@ -16,17 +16,16 @@ from datetime import datetime
 from tqdm import tqdm
 
 
+GROUP_ABV = 'ACU'
+SIG_COVERAGE = 'NA'
 MAIN_URL = "http://ratings.conservative.org/people"
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
-GROUP_ABV = 'ACU'
-
 URL_FILTERS = {'year': 'year=',
                'state': 'state=',
                'party': 'party=',
                'office': 'chamber=',
                'limit': 'limit=',
                'level': 'level='}
-
 STATES = ['AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA', 'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 
           'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ', 'NM', 'NY', 'NC', 'ND', 
           'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY', 'US']
@@ -39,56 +38,56 @@ def apply_url_filter(**filters):
 
 def get_url_param(url, param=None):
     params = url.split('?')[1].split('&')
-    param_dict = {p.split('=')[0]:p.split('=')[1] for p in params}
+    params_dict = {p.split('=')[0]:p.split('=')[1] for p in params}
 
-    if param and param in param_dict.keys():
-        return param_dict[param]
+    if param and param in params_dict.keys():
+        return params_dict[param]
 
 
 def extract(driver):
 
     soup = BeautifulSoup(driver.page_source, 'html.parser')
     candidates = soup.find_all('div', {'class': 'sc-hzDkRC'})
-    level = get_url_param(driver.current_url, 'state')
+    geo_coverage = get_url_param(driver.current_url, 'state')
 
     records = []
     
-    for c in candidates:
+    for candidate in candidates:
 
-        acu_id = c.a['href'].split('/')[-1].strip()
-        name_party, office_state_district = c.find('div', {'class':'sc-fBuWsC'}).find_all('p')
-        name = ''.join(name_party.text.split('(')[:1]).strip()
-        party = ''.join(name_party.text.split('(')[1:]).strip(') ')
-        osd_split = office_state_district.text.split('-')
+        name_party, office_state_district = candidate.find('div', {'class':'sc-fBuWsC'}).find_all('p')
+        rating = candidate.find('div', {'class':'sc-gPEVay'})
 
-        office = osd_split[0].strip() if osd_split else ''
-        state_id = osd_split[1].strip() if len(osd_split) > 1 else ''
-        district = osd_split[2].strip() if len(osd_split) > 2 else ''
+        # name = ''.join(name_party.text.split('(')[:1]).strip()
+        # party = ''.join(name_party.text.split('(')[1:]).strip(') ')
+        # osd_split = office_state_district.text.split('-')
+        # office = osd_split[0].strip() if osd_split else ''
+        # state_id = osd_split[1].strip() if len(osd_split) > 1 else ''
+        # district = osd_split[2].strip() if len(osd_split) > 2 else ''
 
-        score = c.find('div', {'class':'sc-gPEVay'})
-
-        records.append({'acu_id': acu_id,
-                        'name': name,
-                        'party': party,
-                        'office': office,
-                        'state_id': state_id if district else None,
-                        'district:': district if district else state_id,
-                        'score': score.text if score else '',
-                        'level': level})
+        records.append({'sig_candidate_id': candidate.a['href'].split('/')[-1].strip(),
+                        'name_party': name_party,
+                        'office_state': office_state_district.a.text,
+                        'district:': office_state_district.a.next_sibling,
+                        'rating': rating.text,
+                        'geo_coverage': geo_coverage})
 
     return records
 
 
 def download_page(driver):
 
+    foldername = f"{GROUP_ABV}_HTML"
+
+    if not os.path.isdir(f"{SCRIPT_DIR}/{foldername}"):
+        os.mkdir(f"{SCRIPT_DIR}/{foldername}_HTML")
+
     soup = BeautifulSoup(driver.page_source, 'html.parser')
-    level = get_url_param(driver.current_url, 'state')
+    geo_coverage = get_url_param(driver.current_url, 'state')
     year = get_url_param(driver.current_url, 'year')
 
-    if not os.path.isdir(f"{SCRIPT_DIR}/ACU_HTML"):
-        os.mkdir(f"{SCRIPT_DIR}/ACU_HTML")
+    filename = f"{year}_NA_{GROUP_ABV}_Ratings_{geo_coverage}-{datetime.now().strftime('%Y-%m-%d')}.html"
 
-    with open(f"{SCRIPT_DIR}/ACU_HTML/{year}_NA_ACU_Ratings_{level}-{datetime.now().strftime('%Y-%m-%d')}.html", 'w') as f:
+    with open(f"{SCRIPT_DIR}/{foldername}/{filename}", 'w') as f:
         f.write(soup.prettify())
 
 
@@ -128,6 +127,5 @@ def main():
 
 if __name__ == '__main__':
     script, YEAR = sys.argv
-
 
     main()
