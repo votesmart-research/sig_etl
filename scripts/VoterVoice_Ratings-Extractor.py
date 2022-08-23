@@ -1,3 +1,5 @@
+# This is a webscraping script for groups who uses Voter Voice.
+
 import sys
 import os
 import pandas
@@ -14,11 +16,19 @@ from datetime import datetime
 from collections import defaultdict
 
 
-SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 RATINGS_METHODOLOGY = {'Voted with us': '+',
                        'Voted against us': '-',
                        'No position': '*',
                         None: ''}
+
+# def extract_table(table):
+
+#     header = [th.text for th in table.thead.find_all('th')]
+#     rows = [tr.find_all('td') for tr in table.tbody.find_all('tr')]
+
+#     get_text = lambda x: x.text.strip()
+
+#     return [dict(zip(header, map(get_text, row))) for row in rows]
 
 
 def extract(driver):
@@ -29,31 +39,22 @@ def extract(driver):
 
     def _extract(row):
         columns = row.find_all('td')
-        info = columns[0]['title'].strip().split('(')
-        party, state_id, *district = info[-1].split('-')
-        score = columns[1].text.strip()
         rating_string = [td.span['title'] if td.span else None for td in columns[2:]]
-        translated_ratings = "".join([RATINGS_METHODOLOGY[c] for c in rating_string])
+        translated_rating_string = "".join([RATINGS_METHODOLOGY[c] for c in rating_string])
 
-        return {'name': info[0].strip(),
+        return {'name_party_state': columns[0]['title'],
+                'rating': columns[1].text,
+                'rating_string': translated_rating_string,
                 'office': office,
-                'state_id': state_id.strip(')'),
-                'district': "".join(district).strip(')'),
-                'party': party,
-                'ratings': translated_ratings,
-                'score': score}
-
-    session_records = {}
+                }
 
     for session in sessions:
         span = session.header.text.strip() 
         rows = session.table.tbody.find_all('tr')
-        session_records[span] = [_extract(row) for row in rows]
-
-    return session_records
+        yield span, [_extract(row) for row in rows]
 
 
-def records_to_sheet(session_records):
+def export_records(session_records):
 
     with pandas.ExcelWriter(f"{SCRIPT_DIR}/_NA_{GROUP_ABV}_Ratings-Extract.ods") as writer:
         for session, records in session_records.items():
@@ -63,24 +64,29 @@ def records_to_sheet(session_records):
 
 def download_page(driver):
 
+    if not os.path.isdir(f"{SCRIPT_DIR}/HTML_FILES"):
+        os.mkdir(f"{SCRIPT_DIR}/HTML_FILES")
+
     soup = BeautifulSoup(driver.page_source, 'html.parser')
     office = soup.find('div', {'class':'vv-tab-menu-item-active'}).text.strip()
     timestamp = datetime.now().strftime('%Y-%m-%d')
 
-    if not os.path.isdir(f"{SCRIPT_DIR}/{GROUP_ABV}_HTML"):
-        os.mkdir(f"{SCRIPT_DIR}/{GROUP_ABV}_HTML")
-
-    with open(f"{SCRIPT_DIR}/{GROUP_ABV}_HTML/_NA_{GROUP_ABV}_Ratings_{office}-{timestamp}.html", 'w') as f:
+    with open(f"{SCRIPT_DIR}/HTML_FILES/Ratings_{office}-{timestamp}.html", 'w') as f:
         f.write(soup.prettify())
 
 
 def main():
     
-    chrome_service = Service('chromedriver')
-    chrome_options = webdriver.ChromeOptions()
-    chrome_options.add_argument('incognito')
+    # chrome_service = Service('chromedriver')
+    # chrome_options = webdriver.ChromeOptions()
+    # chrome_options.add_argument('incognito')
+    # driver = webdriver.Chrome(service=chrome_service, options=chrome_options)
 
-    driver = webdriver.Chrome(service=chrome_service, options=chrome_options)
+    edge_service = Service('msedgedriver')
+    edge_options = webdriver.EdgeOptions()
+    edge_options.add_argument('inprivate')
+    driver = webdriver.Edge(service=edge_service, options=edge_options)
+
     driver.get(MAIN_URL)
 
     try:
@@ -88,27 +94,29 @@ def main():
             EC.presence_of_all_elements_located((By.XPATH, '//table[@class="vvScorecardAggregate"]/tbody/tr'))
         )
     except TimeoutException:
-        print("ERROR. Page did not load.")
+        print("An error occurred: The page could not load.")
         driver.quit()
         exit()
 
     offices = driver.find_elements(By.XPATH, '//section[@id="vvConsolidatedScorecardResults"]//div[@class="vv-tab-menu-item-container"]')
-    all_records = defaultdict(list)
+    records_by_session = defaultdict(list)
 
     for office in offices:
         office.click()
 
-        for session, records in extract(driver).items():
-                all_records[session] += records
+        for session, records in extract(driver):
+                records_by_session[session] += records
 
         download_page(driver)
 
-    records_to_sheet(all_records)
+    export_records(records_by_session)
 
 
 if __name__ == '__main__':
 
     script, MAIN_URL = sys.argv
+
     GROUP_ABV = MAIN_URL.split('/')[4]
+    SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 
     main()
