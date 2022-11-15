@@ -3,6 +3,7 @@
 import os
 import pandas
 import time
+import sys
 
 from collections import defaultdict
 from selenium import webdriver
@@ -69,8 +70,16 @@ def extract_candidate_info(soup, url):
             'grade': grade.text.strip() if grade else None}
 
 
-def download_page(soup, session, candidate_id):
-    with open(f"{session}_Ratings_{candidate_id}.html", 'w') as f:
+def download_page(driver, session):
+
+    if not os.path.isdir(f"{EXPORTDIR}/HTML_FILES"):
+        os.mkdir(f"{EXPORTDIR}/HTML_FILES")
+
+    url_dash_split = driver.current_url.strip('/').split('-')
+    candidate_id = url_dash_split[-2] if len(url_dash_split) >=2 else None
+    soup = BeautifulSoup(driver.page_source, 'html.parser')
+
+    with open(f"{EXPORTDIR}/HTML_FILES/{session}_Ratings_{candidate_id}.html", 'w') as f:
         f.write(soup.prettify())
 
 
@@ -78,7 +87,7 @@ def main():
 
     chrome_service = Service('chromedriver')
     chrome_options = webdriver.ChromeOptions()
-    chrome_options.add_argument('--incognito')
+    chrome_options.add_argument('incognito')
     
     driver = webdriver.Chrome(service=chrome_service, options=chrome_options)
     soup = driver_to_soup(driver, URL)
@@ -101,7 +110,7 @@ def main():
 
             if record['name']:
                 records.append(record)
-                # download_page(soup, record['session'], record['anca_candidate_id'])
+                download_page(driver, record['session'])
 
                 if record['anca_candidate_id'] in blank_records.keys():
                     urls_to_check[url] = blank_records[record['anca_candidate_id']]
@@ -117,11 +126,12 @@ def main():
         if to_go:
             soup = driver_to_soup(driver, to_go)
             records.append(extract_candidate_info(soup, to_go))
-            # download_page(soup, session, record['anca_candidate_id'])
+            download_page(driver, session)
 
     df = pandas.DataFrame.from_records(records)
-    df.to_csv('_NA_ANCA_Ratings-Extract.csv', index=False)
+    df.to_csv(f'{EXPORTDIR}_NA_ANCA_Ratings-Extract.csv', index=False)
 
 
 if __name__ == "__main__":
+    _, EXPORTDIR = sys.argv
     main()

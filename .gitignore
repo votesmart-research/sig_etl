@@ -129,10 +129,8 @@ dmypy.json
 .pyre/
 
 # Custom ignore files
-.DS_Store
-*/.DS_Store
+*.DS_Store
 *.ini
 *.csv
-test*
-HTML_FILES/
 *.html
+test*

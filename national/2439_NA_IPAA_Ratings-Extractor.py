@@ -1,24 +1,27 @@
 # This is the webscraping script for Independent Petroleum Association of America (IPAA), sig_id=2439
 
 import os
+import sys
 import pandas
+
+from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
+
 from bs4 import BeautifulSoup
 from tqdm import tqdm
 
 
 MAIN_URL = "https://ipaagrassroots.org"
 MAP_URL = "/voting-records-map"
-SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
-CHROMEDRIVER_PATH = os.path.abspath(SCRIPT_DIR + '/chromedriver')
+TIMESTAMP = datetime.now().strftime('%Y-%m-%d')
 
 
-def extract_states(driver):
+def get_states_url(driver):
 
     states = driver.find_elements(By.XPATH, "//select[@name='state']/option")
     state_urls = []
@@ -31,7 +34,7 @@ def extract_states(driver):
     return state_urls
 
 
-def extract_officials_list(driver):
+def get_officials_list(driver):
 
     soup = BeautifulSoup(driver.page_source, 'html.parser')
     block_element = soup.find('div', {'class':'text-wrapper'})
@@ -40,7 +43,7 @@ def extract_officials_list(driver):
     return list(map(lambda a: a['href'], url_elements))
 
 
-def extract_candidate(soup, candidate_id):
+def extract(soup, candidate_id):
 
     name = soup.find('h1', {'class': 'candidate-name'})
     office = soup.find('h2', {'class': 'candidate-office'})
@@ -71,39 +74,35 @@ def extract_candidate(soup, candidate_id):
         else:
             return {}
 
-    record = {'ipaa_candidate_id': candidate_id,
-              'name': name.text.strip() if name else None,
-              'office': office.text.strip() if office else None,
-              'party': party.text.strip() if party else None,
-              'district': district.text.strip() if district else None,
-              'lifetime_score': lifetime_score.text.strip() if lifetime_score else None}
-
-    return record | get_voting_records(soup)
-
-
-def file_to_soup(file):
-    with open(file, 'r') as f:
-        return BeautifulSoup(f.read(), 'html.parser')
+    return {'ipaa_candidate_id': candidate_id,
+            'name': name.text.strip() if name else None,
+            'office': office.text.strip() if office else None,
+            'party': party.text.strip() if party else None,
+            'district': district.text.strip() if district else None,
+            'lifetime_score': lifetime_score.text.strip() if lifetime_score else None} | get_voting_records(soup)
 
 
 def download_page(driver):
 
-    if not os.path.isdir(f"{SCRIPT_DIR}/Ratings"):
-        os.mkdir(f"{SCRIPT_DIR}/Ratings")
+    if not os.path.isdir(f"{EXPORT_DIR}/HTML_FILES"):
+        os.mkdir(f"{EXPORT_DIR}/HTML_FILES")
 
     candidate_id = driver.current_url.split('/')[-1]
     soup = BeautifulSoup(driver.page_source, 'html.parser')
 
-    with open(f"{SCRIPT_DIR}/Ratings/Ratings_{candidate_id}.html", 'w') as f:
+    filename = f"2439_NA_IPAA_Ratings_{candidate_id}_{TIMESTAMP}.html"
+
+    with open(f"{EXPORT_DIR}/HTML_FILES/{filename}", 'w') as f:
         f.write(soup.prettify())
 
 
-def main():    
+def main():
+
     chrome_options = webdriver.ChromeOptions()
     chrome_options.add_argument('incognito')
     chrome_options.add_argument('headless')
-
     chrome_service = Service('chromedriver')
+
     driver = webdriver.Chrome(service=chrome_service, options=chrome_options)
 
     driver.get(MAIN_URL +  MAP_URL)
@@ -115,53 +114,39 @@ def main():
         print("Map element not found. Quitting...")
         exit()
 
-    state_urls = extract_states(driver)
-
+    state_urls = get_states_url(driver)
     officials_urls = []
 
     for url in tqdm(state_urls):
-
         driver.get(f"{MAIN_URL}/{url}")
-
         try:
             officials_list = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.XPATH, "//div[@class='text-wrapper ng-scope ng-isolate-scope']")))
-
         except TimeoutException:
             continue
 
-        officials_urls += extract_officials_list(driver)
+        officials_urls += get_officials_list(driver)
 
     records = []
-    rating_files = [d.split('_')[-1].strip('.html') for d in os.listdir(f"{SCRIPT_DIR}/Ratings") if d.startswith('Ratings')]
 
     for url in tqdm(officials_urls):
-
         ipaa_candidate_id = url.split('/')[-1]
-    
-        if ipaa_candidate_id in rating_files:
+        driver.get(f"{MAIN_URL}/{url}")
+        try:
+            officials_name = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.XPATH, "//h1[@class='title candidate-name ng-binding']")))
+        except TimeoutException:
+            continue
 
-            soup = file_to_soup(f'Ratings/Ratings_{ipaa_candidate_id}.html')
-            records.append(extract_candidate(soup, ipaa_candidate_id))
+        soup = BeautifulSoup(driver.page_source, 'html.parser')
 
-        else:
-            driver.get(f"{MAIN_URL}/{url}")
-
-            try:
-                officials_name = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.XPATH, "//h1[@class='title candidate-name ng-binding']")))
-            
-            except TimeoutException:
-                continue
-
-            soup = BeautifulSoup(driver.page_source, 'html.parser')
-
-            records.append(extract_candidate(soup, ipaa_candidate_id))
-            download_page(driver)
+        records.append(extract(soup, ipaa_candidate_id))
+        download_page(driver)
 
     df = pandas.DataFrame.from_records(records)
-    df.to_csv('_NA_IPAA_Ratings-Extract.csv', index=False)
+    df.to_csv(f'{EXPORT_DIR}/2439_NA_IPAA_Ratings-Extract_{TIMESTAMP}.csv', index=False)
 
     driver.quit()
 
 
 if __name__ == "__main__":
+    _, EXPORT_DIR = sys.argv
     main()

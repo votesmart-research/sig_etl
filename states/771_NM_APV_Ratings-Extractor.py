@@ -8,7 +8,7 @@ from bs4 import BeautifulSoup
 URL = "https://apvnm.org/scorecards/house-scores/"
 
 
-def extract(soup):
+def extract_table(soup):
 
     table = soup.find('table', {'id': 'tablepress-12'})
     header = [th.text for th in table.thead.find_all('th')]
@@ -26,7 +26,7 @@ def main():
 
     soup = BeautifulSoup(page_source, 'html.parser')
    
-    extracted = extract(soup)
+    extracted = extract_table(soup)
         
     df = pandas.DataFrame.from_records(extracted)
     df.to_csv('_NM_APV_Ratings-Extract.csv', index=False)
