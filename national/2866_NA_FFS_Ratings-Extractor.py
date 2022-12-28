@@ -3,6 +3,7 @@
 import os
 import time
 import pandas
+import sys
 
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -12,22 +13,19 @@ from bs4 import BeautifulSoup
 from collections import defaultdict
 
 
-URL = "https://www.freedomfirstsociety.org/scorecard/"
-
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__name__))
-CHROMEDRIVER_PATH = os.path.abspath(SCRIPT_DIR + '/chromedriver')
+MAIN_URL = "https://www.freedomfirstsociety.org/scorecard/"
+CONGRESS_SESSION = '117'
+RATINGS_METHODOLOGY = {'fa-check': '+', 
+                       'fa-times':'-', 
+                       'fa-question':'*'}
 
 
 def extract(soup, other_info):
 
     table = soup.find('div', {'id': 'scorecard-wrapper'}).table
-
     bill_names= [p.text.strip() for p in table.find_all('th')[-1].find_all('p')]
-
     headers = ['state_id', 'name'] + bill_names
     rows = table.tbody.find_all('tr')
-    
-    methodology = {'fa-check': '+', 'fa-times':'-', 'fa-question':'*'}
     
     records = []
 
@@ -37,27 +35,34 @@ def extract(soup, other_info):
         state_id_name = [td.text.strip() for td in columns[:2]]
         scores = [i['class'][-1] for i in columns[2:][-1].find_all('i')]
 
-        translated_scores = [methodology[score] if score in methodology.keys() else '?' for score in scores]
+        translated_scores = [RATINGS_METHODOLOGY[score] if score in RATINGS_METHODOLOGY.keys() else '?' for score in scores]
 
-        record = dict(zip(headers, state_id_name + translated_scores))
-
-        record.update(other_info)
-
+        record = dict(zip(headers, state_id_name + translated_scores)) | other_info
         records.append(record)
 
     return records
+
+
+def download_page(driver, session, office, party):
+
+    soup = BeautifulSoup(driver.page_source, 'html.parser')
+
+    if not os.path.isdir(f"{EXPORT_DIR}/HTML_FILES"):
+        os.mkdir(f"{EXPORT_DIR}/HTML_FILES")
+
+    with open(f"{EXPORT_DIR}/HTML_FILES/{session}_NA_FFS_Ratings_{office}-{party}.html", 'w') as f:
+        f.write(soup.prettify())
 
 
 def main():
 
     chrome_service = Service('chromedriver')
     chrome_options = webdriver.ChromeOptions()
-
     chrome_options.add_argument('incognito')
 
     driver = webdriver.Chrome(service=chrome_service, options=chrome_options)
 
-    driver.get(URL)
+    driver.get(MAIN_URL)
 
     time.sleep(5)
 
@@ -69,7 +74,7 @@ def main():
     select_party = Select(scorecard_form.find_element(By.XPATH, "//select[@ng-model='scorecard.selected_party']"))
     button_go = scorecard_form.find_element(By.XPATH, "//button[@ng-click='scorecard.load_bills()']")
 
-    select_congress.select_by_visible_text('116')
+    select_congress.select_by_visible_text(CONGRESS_SESSION)
 
     records = defaultdict(list)
 
@@ -85,15 +90,17 @@ def main():
                 time.sleep(5)
 
                 soup = BeautifulSoup(driver.page_source, 'html.parser')
+                
+                download_page(driver, option_s.text, option_o.text, option_p.text)
+                
+                office_party = {'office': option_o.text, 'party': option_p.text}
+                records[f'{select_congress.first_selected_option.text}-{option_s.text}'] += extract(soup, other_info=office_party)
 
-                state_party = {'state': option_o.text, 'party': option_p.text}
-
-                records[f'{select_congress.first_selected_option.text}-{option_s.text}'] += extract(soup, other_info=state_party)
-
-    for sheetname, record in records.items():
+    for session, record in records.items():
         df = pandas.DataFrame.from_records(record)
-        df.to_csv(f'{sheetname}_NA_FFS_Ratings-Extract.csv', index=False)
+        df.to_csv(f'{EXPORT_DIR}/{session}_NA_FFS_Ratings-Extract.csv', index=False)
 
 
 if __name__ == "__main__":
+    _, EXPORT_DIR = sys.argv
     main()

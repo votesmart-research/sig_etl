@@ -15,6 +15,7 @@ from tqdm import tqdm
 
 
 MAIN_URL = "http://ratings.conservative.org/people"
+TIMESTAMP = datetime.now().strftime('%Y-%m-%d')
 
 URL_FILTERS = {'year': 'year=',
                'state': 'state=',
@@ -66,34 +67,29 @@ def extract(driver):
 
 def export_records(records):
     df = pandas.DataFrame.from_records(records)
-    df.to_csv(f"{YEAR}_Ratings-Extract_{datetime.now().strftime('%Y-%m-%d')}.csv", index=False)
+    df.to_csv(f"{EXPORTDIR}/{YEAR}_Ratings-Extract_{TIMESTAMP}.csv", index=False)
  
 
 def download_page(driver):
 
-    if not os.path.isdir(f"{SCRIPT_DIR}/HTML_FILES"):
-        os.mkdir(f"{SCRIPT_DIR}/HTML_FILES")
+    if not os.path.isdir(f"{EXPORTDIR}/HTML_FILES"):
+        os.mkdir(f"{EXPORTDIR}/HTML_FILES")
 
     soup = BeautifulSoup(driver.page_source, 'html.parser')
     geo_coverage = get_url_param(driver.current_url, 'state')
 
-    filename = f"Ratings_{geo_coverage}-{datetime.now().strftime('%Y-%m-%d')}.html"
+    filename = f"Ratings_{geo_coverage}-{TIMESTAMP}.html"
 
-    with open(f"{SCRIPT_DIR}/HTML_FILES/{filename}", 'w') as f:
+    with open(f"{EXPORTDIR}/HTML_FILES/{filename}", 'w') as f:
         f.write(soup.prettify())
 
 
 def main():
 
-    # chrome_service = Service('chromedriver')
-    # chrome_options = webdriver.ChromeOptions()
-    # chrome_options.add_argument('incognito')
-    # driver = webdriver.Chrome(service=chrome_service, options=chrome_options)
-
-    edge_service = Service('msedgedriver')
-    edge_options = webdriver.EdgeOptions()
-    edge_options.add_argument('inprivate')
-    driver = webdriver.Edge(service=edge_service, options=edge_options)
+    chrome_service = Service('chromedriver')
+    chrome_options = webdriver.ChromeOptions()
+    chrome_options.add_argument('incognito')
+    driver = webdriver.Chrome(service=chrome_service, options=chrome_options)
 
     records_by_state = []
 
@@ -124,6 +120,5 @@ def main():
 
 
 if __name__ == '__main__':
-    script, YEAR = sys.argv
-    SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
+    script, YEAR, EXPORTDIR = sys.argv
     main()

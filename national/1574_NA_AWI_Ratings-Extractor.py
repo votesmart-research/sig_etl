@@ -2,6 +2,7 @@
 
 import time
 import pandas
+import sys
 
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -34,19 +35,24 @@ def extract(soup):
     return records
 
 
+def download_page(driver, session):
+    soup = BeautifulSoup(driver.page_source, 'html.parser')
+
+    with open(f'{EXPORTDIR}/{session}_NA_AWI_Ratings.html', 'w') as f:
+        f.write(soup.prettify())
+
+
 def main():
 
     chrome_service = Service('chromedriver')
     chrome_options = webdriver.ChromeOptions()
-
     chrome_options.add_argument('incognito')
-
     driver = webdriver.Chrome(service=chrome_service, options=chrome_options)
     driver.get(URL)
 
     combined_records = []
 
-    for value in TO_SELECT:
+    for session in TO_SELECT:
 
         driver.refresh()
 
@@ -58,23 +64,23 @@ def main():
         select_congress = Select(driver.find_element(By.XPATH, "//select[@name='congress_chamber']"))
         button_congress = driver.find_element(By.XPATH, "//form[@action='/AWI/legislators/membercompassionindex']//input")
         
-        select_congress.select_by_value(value)
+        select_congress.select_by_value(session)
         button_congress.click()
 
         time.sleep(3)
 
         soup = BeautifulSoup(driver.page_source, 'html.parser')
-
-        with open(f'{value}_NA_AWI_Ratings.html', 'w') as f:
-            f.write(soup.prettify())
-
+        
+        download_page(driver, session)
+        
         combined_records += extract(soup)
 
         time.sleep(3)
 
     df = pandas.DataFrame.from_records(combined_records)
-    df.to_csv('_NA_AWI_Ratings-Extract.csv', index=False)
+    df.to_csv(f'{EXPORTDIR}/_NA_AWI_Ratings-Extract.csv', index=False)
         
 
 if __name__ == '__main__':
+    _, EXPORTDIR = sys.argv
     main()

@@ -3,6 +3,7 @@
 import os
 import pandas
 import requests
+import sys
 
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -12,7 +13,7 @@ from datetime import datetime
 
 
 MAIN_URL = "https://thenewamerican.com/freedom-index/legislator/"
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__name__))
+
 
 
 def extract_cards(driver):
@@ -46,15 +47,15 @@ def extract_cpage(response):
     return dict(zip(session, scores))
 
 
-def download_cpage(response):
+def download_page(response):
 
     soup = BeautifulSoup(response.text, 'html.parser')
     jbs_id = response.url.strip('/').split('/')[-1]
 
-    if not os.path.isdir(f"{SCRIPT_DIR}/Ratings"):
-        os.mkdir(f"{SCRIPT_DIR}/Ratings")
+    if not os.path.isdir(f"{EXPORTDIR}/HTML_FILES"):
+        os.mkdir(f"{EXPORTDIR}/HTML_FILES")
 
-    with open(f"{SCRIPT_DIR}/JBS_HTML/_NA_JBS_Ratings_{jbs_id}.html", 'w') as f:
+    with open(f"{EXPORTDIR}/HTML_FILES/_NA_JBS_Ratings_{jbs_id}.html", 'w') as f:
         f.write(soup.prettify())
 
 
@@ -78,11 +79,12 @@ def main():
         record.pop('url')
         record.update(extract_cpage(response))
 
-        download_cpage(response)
+        download_page(response)
 
     df = pandas.DataFrame.from_records(records)
-    df.to_csv(f"{SCRIPT_DIR}/_NA_JBS_Ratings-Extract_{datetime.now().strftime('%Y-%m-%d')}.csv", index=False)
+    df.to_csv(f"{EXPORTDIR}/_NA_JBS_Ratings-Extract_{datetime.now().strftime('%Y-%m-%d')}.csv", index=False)
 
 
 if __name__ == '__main__':
+    _, EXPORTDIR = sys.argv
     main()
