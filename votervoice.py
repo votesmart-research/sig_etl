@@ -1,10 +1,8 @@
 # This is a webscraping script for groups who uses Voter Voice.
 
 import sys
-import os
 import pandas
 
-from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
@@ -12,28 +10,27 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 
+from bs4 import BeautifulSoup
+from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
 
+
+TIMESTAMP = datetime.strftime(datetime.now(), '%Y-%m-%d')
 
 RATINGS_METHODOLOGY = {'Voted with us': '+',
                        'Voted against us': '-',
                        'No position': '*',
                         None: ''}
 
-# def extract_table(table):
 
-#     header = [th.text for th in table.thead.find_all('th')]
-#     rows = [tr.find_all('td') for tr in table.tbody.find_all('tr')]
+def extract(driver:webdriver.Chrome, file:str=None):
 
-#     get_text = lambda x: x.text.strip()
-
-#     return [dict(zip(header, map(get_text, row))) for row in rows]
-
-
-def extract(driver):
-
-    soup = BeautifulSoup(driver.page_source, 'html.parser')
+    if file:
+        soup = BeautifulSoup(file, 'html.parser')
+    else:
+        soup = BeautifulSoup(driver.page_source, 'html.parser')
+    
     office = soup.find('div', {'class':'vv-tab-menu-item-active'}).text.strip()
     sessions = soup.find_all('section', {'class':'vv-scorecard-section'})
 
@@ -45,34 +42,41 @@ def extract(driver):
         return {'info': columns[0]['title'],
                 'rating': columns[1].text,
                 'rating_string': translated_rating_string,
-                'office': office,
-                }
+                'office': office}
 
     for session in sessions:
-        span = session.header.text.strip() 
+        span = session.header.text.strip()
         rows = session.table.tbody.find_all('tr')
         yield span, [_extract(row) for row in rows]
 
 
-def export_records(session_records):
-
-    with pandas.ExcelWriter(f"{EXPORT_DIR}/_NA_{GROUP_ABV}_Ratings-Extract.ods") as writer:
-        for session, records in session_records.items():
-            if records:
-                pandas.DataFrame.from_records(records).to_excel(writer, sheet_name=session, index=False)
-
-
-def download_page(driver):
-
-    if not os.path.isdir(f"{EXPORT_DIR}/HTML_FILES"):
-        os.mkdir(f"{EXPORT_DIR}/HTML_FILES")
+def download_page(driver:webdriver.Chrome):
 
     soup = BeautifulSoup(driver.page_source, 'html.parser')
+    HTML_FILES.mkdir(exist_ok=True)
+
     office = soup.find('div', {'class':'vv-tab-menu-item-active'}).text.strip()
     timestamp = datetime.now().strftime('%Y-%m-%d')
 
-    with open(f"{EXPORT_DIR}/HTML_FILES/Ratings_{office}-{timestamp}.html", 'w') as f:
+    with open(HTML_FILES / f"{FILENAME}_{office}-{timestamp}.html", 'w') as f:
         f.write(soup.prettify())
+
+
+def extract_from_file(files:list):
+
+    extracted  = []
+
+    for file in files:
+
+        with open(file, 'r') as f:
+            file_contents = f.read()
+        
+        extracted += extract(driver=None, file=file_contents)
+    
+    EXTRACT_FILES.mkdir(exist_ok=True)
+
+    df = pandas.DataFrame.from_records(extracted)
+    df.to_csv(EXTRACT_FILES / f"{FILENAME}-Extract_{TIMESTAMP}.csv", index=False)
 
 
 def main():
@@ -80,37 +84,48 @@ def main():
     chrome_service = Service('chromedriver')
     chrome_options = webdriver.ChromeOptions()
     chrome_options.add_argument('incognito')
-    driver = webdriver.Chrome(service=chrome_service, options=chrome_options)
+    chrome_options.add_argument('headless')
+    chrome_driver = webdriver.Chrome(service=chrome_service, options=chrome_options)
 
-    driver.get(MAIN_URL)
+    chrome_driver.get(URL)
 
     try:
-        WebDriverWait(driver, 10).until(
+        WebDriverWait(chrome_driver, 10).until(
             EC.presence_of_all_elements_located((By.XPATH, '//table[@class="vvScorecardAggregate"]/tbody/tr'))
         )
     except TimeoutException:
         print("An error occurred: The page could not load.")
-        driver.quit()
+        chrome_driver.quit()
         exit()
 
-    offices = driver.find_elements(By.XPATH, '//section[@id="vvConsolidatedScorecardResults"]//div[@class="vv-tab-menu-item-container"]')
+    offices = chrome_driver.find_elements(By.XPATH, '//section[@id="vvConsolidatedScorecardResults"]//div[@class="vv-tab-menu-item-container"]')
     records_by_session = defaultdict(list)
 
     for office in offices:
         office.click()
 
-        for session, records in extract(driver):
+        for session, records in extract(chrome_driver):
                 records_by_session[session] += records
 
-        download_page(driver)
+        download_page(chrome_driver)
 
-    export_records(records_by_session)
+    EXTRACT_FILES.mkdir(exist_ok=True)
+
+    for session, records in records_by_session.items():
+        if records:
+            df = pandas.DataFrame.from_records(records)
+            df.to_csv(EXTRACT_FILES / f"{session}{FILENAME}-Extract.csv", index=False)
 
 
 if __name__ == '__main__':
 
-    script, MAIN_URL, EXPORT_DIR = sys.argv
+    _, EXPORT_DIR, URL = sys.argv
 
-    GROUP_ABV = MAIN_URL.split('/')[4]
+    EXPORT_DIR = Path(EXPORT_DIR)
+    HTML_FILES = EXPORT_DIR / "HTML_FILES"
+    EXTRACT_FILES = EXPORT_DIR / "EXTRACT_FILES"
+    
+    GROUP_ABV = URL.split('/')[4]
+    FILENAME = f"_{GROUP_ABV}_Ratings"
 
     main()

@@ -1,4 +1,4 @@
-# This is the webscraping script for Susan B. Anthony List, sig_id = 1964
+# This is the webscraping script for Susan B. Anthony List, sig_id = 1946
 
 import pandas
 from selenium import webdriver
@@ -28,6 +28,7 @@ def extract(table, candidate_list):
 
 
 def main():
+    
     chrome_options = webdriver.ChromeOptions()
     chrome_options.add_argument('incognito')
     driver = webdriver.Chrome(options=chrome_options)

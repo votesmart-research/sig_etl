@@ -1,3 +1,5 @@
+# This is the webscraping script for Conservative Review, sig_id=2412
+
 import os
 import time
 import pandas
