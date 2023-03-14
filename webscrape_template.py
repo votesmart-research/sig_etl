@@ -1,52 +1,99 @@
 
-import os
 import sys
 import pandas
 
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.common.action_chains import ActionChains
+
 from bs4 import BeautifulSoup
+from datetime import datetime
+from pathlib import Path
 
 
 URL = ""
 FILENAME = ""
+TIMESTAMP = datetime.strftime(datetime.now(), '%Y-%m-%d')
 
 
-def extract(driver:webdriver.Chrome):
-    soup = BeautifulSoup(driver.page_source, 'html.parser')
+def extract_table(table):
+
+    headers = [th.text for th in table.thead.find_all('th')]
+    rows = [tr.find_all('td') for tr in table.tbody.find_all('tr')]
+
+    get_text = lambda x: x.text.strip()
+
+    return [dict(zip(headers, map(get_text, row))) for row in rows]
+
+
+def extract(driver:webdriver.Chrome, file=None):
+
+    if file:
+        soup = BeautifulSoup(file, 'html.parser')
+    
+    else:
+        soup = BeautifulSoup(driver.page_source, 'html.parser')
 
 
 def download_page(driver:webdriver.Chrome):
+
     soup = BeautifulSoup(driver.page_source, 'html.parser')
 
-    if not os.path.isdir(HTML_FILES):
-        os.mkdir(HTML_FILES)
+    HTML_FILES.mkdir(exist_ok=True)
 
-    filename = f"{FILENAME}"
-
-    with open(f"{HTML_FILES}/{filename}", 'w') as f:
+    with open(HTML_FILES / f"{FILENAME}_{TIMESTAMP}.html", 'w') as f:
         f.write(soup.prettify())
 
 
+def extract_from_file(files:list):
+
+    extracted  = []
+
+    for file in files:
+
+        with open(file, 'r') as f:
+            file_contents = f.read()
+        
+        extracted += extract(driver=None, file=file_contents)
+    
+    EXTRACT_FILES.mkdir(exist_ok=True)
+
+    df = pandas.DataFrame.from_records(extracted)
+    df.to_csv(EXTRACT_FILES / f"{FILENAME}-Extract_{TIMESTAMP}.csv", index=False)
+
+
 def main():
+    
     chrome_service = Service('chromedriver')
     chrome_options = Options()
     chrome_options.add_argument('incognito')
-    # chrome_options.add_argument('headless')
-
+    chrome_options.add_argument('headless')
     chrome_driver = webdriver.Chrome(service=chrome_service, options=chrome_options)
 
     chrome_driver.get(URL)
 
-    soup = BeautifulSoup(chrome_driver.page_source, 'html.parser')
+    # close overlay
+    ActionChains(chrome_driver).send_keys(Keys.ESCAPE).perform()
 
-    df = pandas.DataFrame.from_records()
-    df.to_csv(f"{FILENAME}-Extract.csv", index=False)
+    extracted = extract(chrome_driver)
+    download_page(chrome_driver)
+
+    EXTRACT_FILES.mkdir(exist_ok=True)
+
+    df = pandas.DataFrame.from_records(extracted)
+    df.to_csv(EXTRACT_FILES / f"{FILENAME}-Extract_{TIMESTAMP}.csv", index=False)
     
 
 if __name__ == '__main__':
-    _, EXPORT_DIR = sys.argv
-    HTML_FILES = f"{EXPORT_DIR}/HTML_FILES"
+    _, EXPORT_DIR, *FILES = sys.argv
 
-    main()
+    EXPORT_DIR = Path(EXPORT_DIR)
+    HTML_FILES = EXPORT_DIR / "HTML_FILES"
+    EXTRACT_FILES = EXPORT_DIR / "EXTRACT_FILES"
+
+    if FILES:
+        extract_from_file(FILES)
+    else:
+        main()
