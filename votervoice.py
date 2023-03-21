@@ -64,19 +64,22 @@ def download_page(driver:webdriver.Chrome):
 
 def extract_from_file(files:list):
 
-    extracted  = []
+    extracted  = defaultdict(list)
 
     for file in files:
 
         with open(file, 'r') as f:
             file_contents = f.read()
-        
-        extracted += extract(driver=None, file=file_contents)
+
+        for session, records in extract(driver=None, file=file_contents):
+            extracted[session] += records
     
     EXTRACT_FILES.mkdir(exist_ok=True)
 
-    df = pandas.DataFrame.from_records(extracted)
-    df.to_csv(EXTRACT_FILES / f"{FILENAME}-Extract_{TIMESTAMP}.csv", index=False)
+    for session, records in extracted.items():
+        if records:
+            df = pandas.DataFrame.from_records(records)
+            df.to_csv(EXTRACT_FILES / f"{session}{FILENAME}-Extract.csv", index=False)
 
 
 def main():
@@ -99,19 +102,19 @@ def main():
         exit()
 
     offices = chrome_driver.find_elements(By.XPATH, '//section[@id="vvConsolidatedScorecardResults"]//div[@class="vv-tab-menu-item-container"]')
-    records_by_session = defaultdict(list)
+    extracted = defaultdict(list)
 
     for office in offices:
         office.click()
 
         for session, records in extract(chrome_driver):
-                records_by_session[session] += records
+                extracted[session] += records
 
         download_page(chrome_driver)
 
     EXTRACT_FILES.mkdir(exist_ok=True)
 
-    for session, records in records_by_session.items():
+    for session, records in extracted.items():
         if records:
             df = pandas.DataFrame.from_records(records)
             df.to_csv(EXTRACT_FILES / f"{session}{FILENAME}-Extract.csv", index=False)

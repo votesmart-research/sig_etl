@@ -13,19 +13,9 @@ from datetime import datetime
 from pathlib import Path
 
 
-URL = ""
-FILENAME = ""
+URL = "https://pawpac.org/calreport/22/"
+FILENAME = "_CA_PAW_Ratings"
 TIMESTAMP = datetime.strftime(datetime.now(), '%Y-%m-%d')
-
-
-def extract_table(table):
-
-    headers = [th.text for th in table.thead.find_all('th')]
-    rows = [tr.find_all('td') for tr in table.tbody.find_all('tr')]
-
-    get_text = lambda x: x.text.strip()
-
-    return [dict(zip(headers, map(get_text, row))) for row in rows]
 
 
 def extract(driver:webdriver.Chrome, file:str=None):
@@ -36,8 +26,17 @@ def extract(driver:webdriver.Chrome, file:str=None):
     else:
         soup = BeautifulSoup(driver.page_source, 'html.parser')
 
+    table = soup.find('table')
+    headers = [th.text for th in table.thead.find_all('th')[1:]]
+    rows = [tr.find_all('td') for tr in table.tbody.find_all('tr')]
+
+    get_text = lambda x: x.text.strip()
+
+    return [dict(zip(headers, map(get_text, row))) for row in rows]
+
 
 def download_page(driver:webdriver.Chrome):
+
 
     soup = BeautifulSoup(driver.page_source, 'html.parser')
 
