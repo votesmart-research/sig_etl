@@ -1,6 +1,6 @@
-
 import sys
 import pandas
+import re
 
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -13,19 +13,9 @@ from datetime import datetime
 from pathlib import Path
 
 
-URL = ""
-FILENAME = ""
+URL = "https://www.cvsc.org/legislative/scorecards/"
+FILENAME = "_SC_CVSC_Ratings"
 TIMESTAMP = datetime.strftime(datetime.now(), '%Y-%m-%d')
-
-
-def extract_table(table):
-
-    headers = [th.text for th in table.thead.find_all('th')]
-    rows = [tr.find_all('td') for tr in table.tbody.find_all('tr')]
-
-    get_text = lambda x: x.text.strip()
-
-    return [dict(zip(headers, map(get_text, row))) for row in rows]
 
 
 def extract(driver:webdriver.Chrome, file:str=None):
@@ -35,6 +25,23 @@ def extract(driver:webdriver.Chrome, file:str=None):
     
     else:
         soup = BeautifulSoup(driver.page_source, 'html.parser')
+
+    s_list = soup.find('div', {'id':'scorecardlist'})
+    headers = [div.text.strip() for div in s_list.find('div', {'class':'scorecard__list__header'}
+                                                        ).find_all('div')
+              ]
+
+    get_text = lambda x: x.text.strip()
+
+    extracted = []
+    
+    for div in s_list.find_all('div', {'class':'scorecard__listitem'})[1:]:
+        columns = div.find_all('div')
+        sig_candidate_id = columns[0].a['href'].split('/')[-1]
+        extracted.append({'sig_candidate_id': sig_candidate_id} |
+                         dict(zip(headers, map(get_text, columns))))
+
+    return extracted
 
 
 def download_page(driver:webdriver.Chrome):
