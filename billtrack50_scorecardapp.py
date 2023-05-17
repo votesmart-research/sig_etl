@@ -27,7 +27,7 @@ FILENAME = "_Ratings"
 TIMESTAMP = datetime.strftime(datetime.now(), '%Y-%m-%d')
 
 
-def extract(driver:webdriver.Chrome, additional_info:dict=None, file:str=None):
+def extract(driver:webdriver.Chrome, file:str=None, **columns):
     
     if file:
         soup = BeautifulSoup(file, 'html.parser')
@@ -52,8 +52,8 @@ def extract(driver:webdriver.Chrome, additional_info:dict=None, file:str=None):
     return {'sig_candidate_id': sig_candidate_id,
             'name': name.text.strip() if name else None,
             'info': info.text.strip() if info else None} \
-            | additional_info if additional_info else {} \
-            | dict(zip(score_headers, scores))
+            | dict(zip(score_headers, scores)) \
+            | columns if columns else {} \
 
 
 def extract_card(driver:webdriver.Chrome, file:str=None):
@@ -112,7 +112,7 @@ def extract_from_file(files:list, cards:bool=True):
             records += extract_card(driver=None, file=file_contents).values()
 
         else:
-            records.append(extract(file_contents))
+            records.append(extract(driver=None, file=file_contents))
 
     EXTRACT_FILES.mkdir(exist_ok=True)
 
@@ -163,7 +163,7 @@ def main():
         # striping the '#' would prevent the session from redirecting itself
         card_info = card_records[candidate_url]['info']
         chrome_driver.get(f"{CURRENT_URL.rstrip('#/')}{candidate_url}")
-        extracted.append(extract(chrome_driver, additional_info={'card_info': card_info}))
+        extracted.append(extract(chrome_driver, card_info=card_info))
         download_page(chrome_driver)
 
     EXTRACT_FILES.mkdir(exist_ok=True)
