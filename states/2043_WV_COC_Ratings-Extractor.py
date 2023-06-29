@@ -6,7 +6,6 @@ from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.common.by import By
 from selenium.webdriver.common.action_chains import ActionChains
 
 from bs4 import BeautifulSoup
@@ -14,19 +13,9 @@ from datetime import datetime
 from pathlib import Path
 
 
-URL = ""
-FILENAME = ""
+URL = "https://wvchamber.com/scorecard/default.aspx"
+FILENAME = "_WV_COC_Ratings"
 TIMESTAMP = datetime.strftime(datetime.now(), '%Y-%m-%d')
-
-
-def extract_table(table):
-
-    headers = [th.text for th in table.thead.find_all('th')]
-    rows = [tr.find_all('td') for tr in table.tbody.find_all('tr')]
-
-    get_text = lambda x: x.text.strip()
-
-    return [dict(zip(headers, map(get_text, row))) for row in rows]
 
 
 def extract(driver:webdriver.Chrome, file:str=None):
@@ -36,6 +25,16 @@ def extract(driver:webdriver.Chrome, file:str=None):
     
     else:
         soup = BeautifulSoup(driver.page_source, 'html.parser')
+
+    scorecard_data = soup.find('div', {'id':'ScorecardData'})
+    table = scorecard_data.find('table')
+
+    headers = [th.text.strip() for th in table.thead.find_all('td')]
+    rows = [tr.find_all('td') for tr in table.tbody.find_all('tr')]
+
+    get_text = lambda x: x.text.strip()
+
+    return [dict(zip(headers, map(get_text, row))) for row in rows]
 
 
 def download_page(driver:webdriver.Chrome):
@@ -61,7 +60,7 @@ def extract_from_file(files:list):
     
     EXTRACT_FILES.mkdir(exist_ok=True)
 
-    df = pandas.DataFrame.from_records(extracted)
+    df = pandas.DataFrame.from_dict(extracted)
     df.to_csv(EXTRACT_FILES / f"{FILENAME}-Extract_{TIMESTAMP}.csv", index=False)
 
 
@@ -70,7 +69,7 @@ def main():
     chrome_service = Service('chromedriver')
     chrome_options = Options()
     chrome_options.add_argument('incognito')
-    chrome_options.add_argument('headless')
+    # chrome_options.add_argument('headless')
     chrome_driver = webdriver.Chrome(service=chrome_service, options=chrome_options)
 
     chrome_driver.get(URL)
@@ -80,7 +79,7 @@ def main():
 
     extracted = extract(chrome_driver)
     download_page(chrome_driver)
-
+    
     EXTRACT_FILES.mkdir(exist_ok=True)
 
     df = pandas.DataFrame.from_records(extracted)

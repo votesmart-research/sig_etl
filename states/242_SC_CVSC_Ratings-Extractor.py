@@ -1,6 +1,5 @@
 import sys
 import pandas
-import re
 
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service

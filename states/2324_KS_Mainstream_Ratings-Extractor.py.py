@@ -6,7 +6,6 @@ from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.common.by import By
 from selenium.webdriver.common.action_chains import ActionChains
 
 from bs4 import BeautifulSoup
@@ -14,19 +13,8 @@ from datetime import datetime
 from pathlib import Path
 
 
-URL = ""
-FILENAME = ""
+FILENAME = "_KS_Mainstream_Ratings"
 TIMESTAMP = datetime.strftime(datetime.now(), '%Y-%m-%d')
-
-
-def extract_table(table):
-
-    headers = [th.text for th in table.thead.find_all('th')]
-    rows = [tr.find_all('td') for tr in table.tbody.find_all('tr')]
-
-    get_text = lambda x: x.text.strip()
-
-    return [dict(zip(headers, map(get_text, row))) for row in rows]
 
 
 def extract(driver:webdriver.Chrome, file:str=None):
@@ -36,6 +24,14 @@ def extract(driver:webdriver.Chrome, file:str=None):
     
     else:
         soup = BeautifulSoup(driver.page_source, 'html.parser')
+
+    table = soup.find('table', {'id':'scorecard'})
+    headers = [th.text.strip() for th in table.thead.find_all('td')]
+    rows = [tr.find_all('td') for tr in table.tbody.find_all('tr')]
+
+    get_text = lambda x: x.text.strip()
+
+    return [dict(zip(headers, map(get_text, row))) for row in rows]
 
 
 def download_page(driver:webdriver.Chrome):
@@ -88,7 +84,7 @@ def main():
     
 
 if __name__ == '__main__':
-    _, EXPORT_DIR, *FILES = sys.argv
+    _, EXPORT_DIR, URL, *FILES = sys.argv
 
     EXPORT_DIR = Path(EXPORT_DIR)
     HTML_FILES = EXPORT_DIR / "HTML_FILES"

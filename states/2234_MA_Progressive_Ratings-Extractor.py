@@ -14,19 +14,9 @@ from datetime import datetime
 from pathlib import Path
 
 
-URL = ""
-FILENAME = ""
+URL = "https://scorecard.progressivemass.com/all-legislators/"
+FILENAME = "_MA_ProgressiveMA_Ratings"
 TIMESTAMP = datetime.strftime(datetime.now(), '%Y-%m-%d')
-
-
-def extract_table(table):
-
-    headers = [th.text for th in table.thead.find_all('th')]
-    rows = [tr.find_all('td') for tr in table.tbody.find_all('tr')]
-
-    get_text = lambda x: x.text.strip()
-
-    return [dict(zip(headers, map(get_text, row))) for row in rows]
 
 
 def extract(driver:webdriver.Chrome, file:str=None):
@@ -36,15 +26,27 @@ def extract(driver:webdriver.Chrome, file:str=None):
     
     else:
         soup = BeautifulSoup(driver.page_source, 'html.parser')
+    
+    selected_tab = soup.find('div', {'class':'RRT__tab', 'aria-selected':'true'})
+
+    table = soup.find('table')
+    headers = [th.text for th in table.thead.find_all('th')]
+    rows = [tr.find_all('td') for tr in table.tbody.find_all('tr')]
+    
+    get_text = lambda x: x.text.strip().replace('\xa0', '')
+
+    return [dict(zip(headers, map(get_text, row))) | {'office':selected_tab.text} for row in rows]
 
 
 def download_page(driver:webdriver.Chrome):
 
     soup = BeautifulSoup(driver.page_source, 'html.parser')
+    selected_tab = soup.find('div', {'class':'RRT__tab', 'aria-selected':'true'})
+    office = selected_tab.text
 
     HTML_FILES.mkdir(exist_ok=True)
 
-    with open(HTML_FILES / f"{FILENAME}_{TIMESTAMP}.html", 'w') as f:
+    with open(HTML_FILES / f"{FILENAME}_{office}-{TIMESTAMP}.html", 'w') as f:
         f.write(soup.prettify())
 
 
@@ -78,8 +80,14 @@ def main():
     # close overlay
     ActionChains(chrome_driver).send_keys(Keys.ESCAPE).perform()
 
-    extracted = extract(chrome_driver)
-    download_page(chrome_driver)
+    tabs = chrome_driver.find_elements(By.XPATH, "//div[@role='tab']")
+
+    extracted = []
+
+    for tab in tabs:
+        tab.click()
+        extracted += extract(chrome_driver)
+        download_page(chrome_driver)
 
     EXTRACT_FILES.mkdir(exist_ok=True)
 

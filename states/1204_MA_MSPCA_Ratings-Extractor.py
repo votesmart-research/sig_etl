@@ -38,7 +38,7 @@ def download_page(driver:webdriver.Chrome):
 
     HTML_FILES.mkdir(exist_ok=True)
 
-    with open(HTML_FILES / f"{FILENAME}_{TIMESTAMP}", 'w') as f:
+    with open(HTML_FILES / f"{FILENAME}_{TIMESTAMP}.html", 'w') as f:
         f.write(soup.prettify())
 
 
