@@ -1,39 +1,101 @@
 # This is the webscraping script for Maine Education Association, sig_id = 969
 
-import requests
 import pandas
+
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+
 from bs4 import BeautifulSoup
+from pathlib import Path
+from datetime import datetime
 
 
-URL = "https://maineea.org/2021-scorecard/"
+FILENAME = "_ME_MEA_Ratings"
+TIMESTAMP = datetime.strftime(datetime.now(), '%Y-%m-%d')
 
-def extract(soup, table):
-    header = [th.text for th in table.thead.find_all('th')]
-    rows = [tr.find_all('td') for tr in table.tbody.find_all('tr')]
 
-    get_text = lambda x: x.text
+def extract(driver:webdriver.Chrome, file:str=None):
 
-    return [dict(zip(header, map(get_text, row))) for row in rows]
+    if file:
+        soup = BeautifulSoup(file, 'html.parser')
+    
+    else:
+        soup = BeautifulSoup(driver.page_source, 'html.parser')
 
+    def extract_table(table):
+        headers = [th.text for th in table.thead.find_all('th')]
+        rows = [tr.find_all('td') for tr in table.tbody.find_all('tr')]
+
+        get_text = lambda x: x.text.strip()
+
+        return [dict(zip(headers, map(get_text, row))) for row in rows]
+
+    extracted = []
+
+    for table in soup.find_all('table'):
+        extracted += extract_table(table)
+
+    return extracted
+
+
+def extract_from_file(files:list):
+
+    extracted  = []
+
+    for file in files:
+
+        with open(file, 'r') as f:
+            file_contents = f.read()
+        
+        extracted += extract(driver=None, file=file_contents)
+    
+    EXTRACT_FILES.mkdir(exist_ok=True)
+
+    df = pandas.DataFrame.from_records(extracted)
+    df.to_csv(EXTRACT_FILES / f"{FILENAME}-Extract_{TIMESTAMP}.csv", index=False)
+
+
+def download_page(driver:webdriver.Chrome):
+
+    soup = BeautifulSoup(driver.page_source, 'html.parser')
+
+    HTML_FILES.mkdir(exist_ok=True)
+
+    with open(HTML_FILES / f"{FILENAME}_{TIMESTAMP}.html", 'w') as f:
+        f.write(soup.prettify())
 
 
 def main():
-    response = requests.get(URL)
-    page_source = response.text
 
-    soup = BeautifulSoup(page_source, 'html.parser')
-    
-    table = soup.find('table', {'id': 'tablepress-84'})
-    extract_house = extract(soup, table)
+    chrome_service = Service('chromedriver')
+    chrome_options = Options()
+    chrome_options.add_argument('incognito')
+    chrome_options.add_argument('headless')
 
-    table = soup.find('table', {'id': 'tablepress-85'})
-    extract_senate = extract(soup, table)
+    chrome_driver = webdriver.Chrome(service=chrome_service, options=chrome_options)
 
-    df_house = pandas.DataFrame.from_records(extract_house)
-    df_house.to_csv('ME_MEA_Ratings-Extract_House.csv', index=False)
+    chrome_driver.get(URL)
 
-    df_senate = pandas.DataFrame.from_records(extract_senate)
-    df_senate.to_csv('ME_MEA_Ratings-Extract_Senate.csv', index=False)
-    
+    extracted = extract(chrome_driver)
+    download_page(chrome_driver)
+
+    EXTRACT_FILES.mkdir(exist_ok=True)
+
+    df = pandas.DataFrame.from_records(extracted)
+    df.to_csv(EXTRACT_FILES / f"{FILENAME}-Extract_{TIMESTAMP}.csv", index=False)
+
+
 if __name__ == "__main__":
-    main()
+    import sys
+
+    _, EXPORT_DIR, URL, *FILES = sys.argv
+
+    EXPORT_DIR = Path(EXPORT_DIR)
+    HTML_FILES = EXPORT_DIR / "HTML_FILES"
+    EXTRACT_FILES = EXPORT_DIR / "EXTRACT_FILES"
+
+    if FILES:
+        extract_from_file(FILES)
+    else:
+        main()

@@ -1,4 +1,5 @@
 
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -8,32 +9,35 @@ from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.by import By
-from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
-from selenium.common.exceptions import NoSuchElementException
+from tqdm import tqdm
 
 
-URL = ""
+URL = "https://hslf.org/current_scorecard"
 
 
 def extract(page_source):
 
     soup = BeautifulSoup(page_source, 'html.parser')
 
-    def extract_table(table):
+    rep_container = soup.find('div', {'id': 'rep'})
+    info_container = rep_container.find(
+        'div', {'class': 'detail'}) if rep_container else None
+    info = info_container.find(
+        'span', {'class': 'eyebrow'}) if info_container else None
+    name = info_container.find('h2') if info_container else None
 
-        headers = [th.get_text(strip=True)
-                   for th in table.thead.find_all('th')]
-        rows = [tr.find_all('td') for tr in table.tbody.find_all('tr')]
+    score_container = rep_container.find('div', {'class': 'score'})
+    score_heading = [strong.get_text(strip=True)
+                     for strong in score_container.find_all('strong')]
+    score_text = [em.get_text(strip=True)
+                  for em in score_container.find_all('em')]
+    scores = dict(zip(score_heading, score_text))
 
-        def get_text(x): return x.get_text(strip=True)
-
-        return [dict(zip(headers, map(get_text, row))) for row in rows]
-
-    return soup
+    return {'name': name.get_text(strip=True) if name else None,
+            'info': info.get_text(strip=True) if info else None} | scores
 
 
 def extract_files(files: list):
@@ -41,9 +45,8 @@ def extract_files(files: list):
     extracted = []
 
     for file in files:
-
         with open(file, 'r') as f:
-            extracted += extract(f.read())
+            extracted.append(extract(f.read()))
 
     return extracted
 
@@ -85,13 +88,25 @@ def main():
         service=chrome_service, options=chrome_options)
 
     chrome_driver.get(URL)
+    rows = WebDriverWait(chrome_driver, 10).until(EC.presence_of_all_elements_located(
+        (By.XPATH, "//table[@class='scorecard_table']/tbody/tr")))
 
-    # close overlay
-    ActionChains(chrome_driver).send_keys(Keys.ESCAPE).perform()
+    filtered_rows = filter(
+        lambda tr: 'state-label' not in tr.get_attribute('class'), rows)
 
-    extracted = extract(chrome_driver.page_source)
-
-    save_html(chrome_driver.page_source, export_dir)
+    extracted = []
+    for tr in tqdm(list(filtered_rows)):
+        row = WebDriverWait(chrome_driver, 10).until(EC.visibility_of_element_located(
+            (By.XPATH, f"//tr[@id='{tr.get_attribute('id')}']")
+        ))
+        row.click()
+        extracted.append(extract(chrome_driver.page_source))
+        save_html(chrome_driver.page_source, export_dir)
+        time.sleep(0.8)
+        back_to_list = WebDriverWait(chrome_driver, 10).until(EC.visibility_of_element_located(
+            (By.XPATH, "//a[@class='back-to-list']")))
+        back_to_list.click()
+        time.sleep(1)
 
     return extracted
 
