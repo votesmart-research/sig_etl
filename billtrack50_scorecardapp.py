@@ -136,10 +136,10 @@ def save_extract(extracted: dict[dict], filepath=None):
 
 def main():
 
-    chrome_service = Service('chromedriver')
+    chrome_service = Service()
     chrome_options = Options()
     chrome_options.add_argument('incognito')
-    chrome_options.add_argument('headless')
+    # chrome_options.add_argument('headless')
     chrome_driver = webdriver.Chrome(
         service=chrome_service, options=chrome_options)
 

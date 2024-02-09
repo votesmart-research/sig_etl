@@ -13,7 +13,6 @@ from datetime import datetime
 from pathlib import Path
 
 
-
 def go_and_get_soup(url):
 
     chrome_service = Service('chromedriver')

@@ -1,7 +1,7 @@
 
 from datetime import datetime
 from pathlib import Path
-
+import time
 
 import pandas
 from bs4 import BeautifulSoup
@@ -12,16 +12,18 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support.ui import WebDriverWait, Select
 from selenium.common.exceptions import NoSuchElementException
 
 
-URL = ""
+URL = "https://www.nea.org/advocating-for-change/action-center/nea-in-congress/report-card"
 
 
 def extract(page_source, **additional_info):
 
     soup = BeautifulSoup(page_source, 'html.parser')
+
+    tables = soup.find_all('table', {'class': 'dataTable'})
 
     def extract_table(table):
 
@@ -33,7 +35,12 @@ def extract(page_source, **additional_info):
 
         return [dict(zip(headers, map(get_text, row))) | additional_info for row in rows]
 
-    return soup
+    extracted = []
+    
+    for table in tables:
+        extracted += extract_table(table)
+
+    return extracted
 
 
 def extract_files(files: list):
@@ -89,8 +96,11 @@ def main(export_dir):
     # close overlay
     ActionChains(chrome_driver).send_keys(Keys.ESCAPE).perform()
 
-    extracted = extract(chrome_driver.page_source)
+    for el in chrome_driver.find_elements(By.XPATH, "//div[@class='table__content']"):
+        select = Select(el.find_element(By.CSS_SELECTOR, 'select'))
+        select.select_by_value('-1')
 
+    extracted = extract(chrome_driver.page_source)
     save_html(chrome_driver.page_source, export_dir)
 
     return extracted
@@ -100,16 +110,12 @@ if __name__ == '__main__':
     import argparse
 
     parser = argparse.ArgumentParser(prog='sig_webscrape')
-    parser.add_argument('-u', '--url', type=Path, required=True,
-                        help='website url where the ratings are located')
-    parser.add_argument('-e', '--exportdir', type=Path, required=True,
+    parser.add_argument('-d', '--exportdir', type=Path, required=True,
                         help='file directory of where the files exports to')
     parser.add_argument('-f', '--htmldir', type=Path,
                         help='file directory of html files to read')
 
     args = parser.parse_args()
-    
-    URL = args.url
 
     if args.htmldir:
         html_files = filter(lambda f: f.name.endswith(
