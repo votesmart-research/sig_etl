@@ -1,11 +1,14 @@
 # This is the webscrape for American Civil Liberties Union (ACLU), sig_id=1378
 
+import re
 import time
 import pandas
-import re
+
 
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from bs4 import BeautifulSoup
@@ -41,13 +44,16 @@ def extract(soup):
 
 
 def main():
+
     chrome_service = Service('chromedriver')
-    chrome_options = webdriver.ChromeOptions()
+    chrome_options = Options()
+    chrome_options.add_argument('incognito')
+    chrome_options.add_argument('headless')
+    chrome_driver = webdriver.Chrome(service=chrome_service, options=chrome_options)
 
-    driver = webdriver.Chrome(service=chrome_service, options=chrome_options)
-    driver.get(URL)
+    chrome_driver.get(URL)
 
-    html = driver.find_element(By.TAG_NAME, 'html')
+    html = chrome_driver.find_element(By.TAG_NAME, 'html')
 
     counter = 0
 
@@ -57,7 +63,7 @@ def main():
 
         time.sleep(0.75)
 
-        soup = BeautifulSoup(driver.page_source, 'html.parser')
+        soup = BeautifulSoup(chrome_driver.page_source, 'html.parser')
         temp_counter = len(soup.find_all('div', {'class': 'state-results'}))
 
         if not(temp_counter - counter):

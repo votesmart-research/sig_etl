@@ -1,66 +1,148 @@
-# This is the webscraping script for National Organization for the Reform of Marijuana (NORML), sig_id=599
 
-import requests
+from datetime import datetime
+from pathlib import Path
+from itertools import chain
+from urllib.parse import urljoin
+
 import pandas
-
 from bs4 import BeautifulSoup
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.common.action_chains import ActionChains
+from tqdm import tqdm
 
-main_page = "https://vote.norml.org/"
-main_pagesource = requests.get(main_page).content
-main_soup = BeautifulSoup(main_pagesource,'html.parser')
 
-states = [li.find('a')['href'] for li in main_soup.find('div', {'id':'states-container'}).find_all('li')]
+URL = "https://vote.norml.org/"
 
-records = []
-dupechecks = []
 
-for state in states:
+def get_states(page_source):
+    soup = BeautifulSoup(page_source, 'html.parser')
+    state_links = chain(*(l.find_all('a')
+                        for l in soup.find_all(class_='state-list')))
+    
+    return {a.get_text(strip=True): urljoin(URL, a['href']) for a in state_links}
 
-    state_page = main_page + state
-    state_pagesource = requests.get(state_page).content
-    state_soup = BeautifulSoup(state_pagesource,'html.parser')
-    state_code = state.split('/')[-1]
 
-    races = state_soup.find_all('div', {'class':'race-container'})
+def extract(page_source, **additional_info) -> list:
 
-    print(state_code)
+    soup = BeautifulSoup(page_source, 'html.parser')
+    race_containers = soup.find_all(class_='race-container')
+    state = soup.find(class_='big-title').get_text(strip=True)
+    state_text = state.replace(" Guide", "")
 
-    collected_count = 0
-    inc_count = 0
-    can_count = 0
+    def extract_container(race_container):
+        office = race_container.find(class_='race-title')
+        endorsed_containers = race_container.find_all(
+            class_='endorsed-container')
 
-    for race in races:
+        for ec in endorsed_containers:
+            name = ec.find(class_='candidate-name')
+            score = ec.find(class_='candidate-score')
 
-        race_title = race.find('div', {'class':'race-title'}).text.strip()
-        candidates = race.find_all('div', {'class':'candidate-inner'})
+            yield {'name': name.get_text(strip=True, separator=' '),
+                   'score': score.get_text(strip=True, separator=' '),
+                   'office': office.get_text(strip=True, separator=' '), 
+                   'state': state_text, } | additional_info
+    
+    extracted = []
+    for rc in race_containers:
+        extracted += list(extract_container(rc))
 
-        for candidate in candidates:
+    return extracted
 
-            score = candidate.find('span', {'class':'candidate-score'}).text.strip()
-            name = candidate.find('span', {'class':'candidate-name'}).text.strip()
-            candidate_type = 'candidate' if "Race for" in  race_title else 'incumbent'
 
-            if "President" in race_title:
-                state_id = 'NA'
-            else:
-                state_id = state_code
+def extract_files(files: list):
 
-            record = {'name':name, 'score':score, 'office-district':race_title.replace("Race for ", ''), 'state':state_id, 'type':candidate_type}
+    extracted = []
 
-            dupecheck = {'name':name, 'score':score, 'state':state_id}
+    for file in files:
 
-            if dupecheck not in dupechecks:
-                records.append(record)
-                dupechecks.append(dupecheck)
-                collected_count+=1
+        with open(file, 'r') as f:
+            extracted += extract(f.read())
 
-                if candidate_type == 'incumbent':
-                    inc_count += 1
-                elif candidate_type == 'candidate':
-                    can_count += 1
+    return {'candidates': list(filter(lambda record: record['office'].startswith("Race for"), extracted)),
+            'incumbents': list(filter(lambda record: not record['office'].startswith("Race for"), extracted))}
 
-    print("Incumbents:",round(inc_count/collected_count*100))
-    print("Candidate:",round(can_count/collected_count*100))
 
-df = pandas.DataFrame.from_records(records)
-df.to_csv('2020_NA_NORML_Scorecard-Extract.csv')
+def save_html(page_source, filepath, *additional_info):
+
+    soup = BeautifulSoup(page_source, 'html.parser')
+
+    filepath = Path(filepath) / 'HTML_FILES'
+    filepath.mkdir(exist_ok=True)
+
+    timestamp = datetime.strftime(datetime.now(), '%Y-%m-%d-%H%M%S-%f')
+
+    with open(filepath / f"Ratings_{'-'.join(map(str, additional_info))}"
+                         f"{'-' if additional_info else ''}{timestamp}.html", 'w') as f:
+        f.write(str(soup))
+
+
+def save_extract(extracted: list[dict], filepath, *additional_info):
+
+    filepath = Path(filepath) / 'EXTRACT_FILES'
+    filepath.mkdir(exist_ok=True)
+
+    timestamp = datetime.strftime(datetime.now(), '%Y-%m-%d-%H%M%S-%f')
+
+    df = pandas.DataFrame.from_records(extracted)
+    df.to_csv(
+        filepath / f"Ratings-Extract_{'-'.join(map(str, additional_info))}"
+                   f"{'-' if additional_info else ''}{timestamp}.csv", index=False)
+
+
+def main() -> dict[list]:
+
+    chrome_service = Service()
+    chrome_options = Options()
+    chrome_options.add_argument('incognito')
+    chrome_options.add_argument('headless')
+    chrome_driver = webdriver.Chrome(
+        service=chrome_service, options=chrome_options)
+
+    chrome_driver.get(URL)
+
+    # close overlay
+    ActionChains(chrome_driver).send_keys(Keys.ESCAPE).perform()
+
+    states = get_states(chrome_driver.page_source)
+    p_bar = tqdm(total=len(states), desc='Extracting State')
+
+    extracted = []
+
+    for state, url in states.items():
+        p_bar.desc = f"Extracting {state}"
+    
+        chrome_driver.get(url)
+        extracted += extract(chrome_driver.page_source)
+        save_html(chrome_driver.page_source, export_dir, state)
+
+        p_bar.update(1)
+
+    return {'candidates': list(filter(lambda record: record['office'].startswith("Race for"), extracted)), 
+            'incumbents': list(filter(lambda record: not record['office'].startswith("Race for"), extracted))}
+
+
+if __name__ == '__main__':
+    import argparse
+
+    parser = argparse.ArgumentParser(prog='sig_webscrape')
+    parser.add_argument('-d','--exportdir', help='file directory of where the files exports to', required=True)
+    parser.add_argument('-f', '--htmldir', help='file directory of html files')
+
+    args = parser.parse_args()
+
+    export_dir = Path(args.exportdir)
+    if args.htmldir:
+        html_dir = Path(args.htmldir)
+        html_files = filter(lambda f: f.name.endswith(
+            '.html'), (export_dir/html_dir).iterdir())
+        extracted = extract_files(
+            sorted(html_files, key=lambda x: x.stat().st_ctime))
+    else:
+        extracted = main()
+
+    save_extract(extracted['candidates'], export_dir, 'candidates')
+    save_extract(extracted['incumbents'], export_dir, 'incumbents')

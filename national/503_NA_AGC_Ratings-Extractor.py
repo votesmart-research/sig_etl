@@ -1,28 +1,22 @@
 # This is the webscraping script for Associated General Contractors of America (AGC), sig_id=503
 
-import os
-import sys
-import requests
-import pandas
-
+from pathlib import Path
+from urllib.parse import urlparse, urljoin
 from datetime import datetime
+
+import pandas
 from bs4 import BeautifulSoup
-from tqdm import tqdm
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
 
 
-GROUP_ABV = 'AGC'
-SIG_ID = 503
-MAIN_URL = "https://agcscorecard.voxara.net"
-
-PARAMETERS = {'session': 'search-congress',
-              'party': 'search-party',
-              'state': 'search-state'}
+URL = "https://agcscorecard.voxara.net"
 
 TIMESTAMP = datetime.strftime(datetime.now(), '%Y-%m-%d-%H%M')
 
 
-def extract(response):
-
+def extract(page_source):
     """
     Headers
     =======
@@ -35,54 +29,84 @@ def extract(response):
     lifetime: percent
     """
 
-    soup = BeautifulSoup(response.text, 'html.parser')
-    headers = ['agc_candidate_id'] + list(map(lambda th: th.text.strip().lower(), 
-                                        soup.table.thead.find_all('th')))
+    soup = BeautifulSoup(page_source, 'html.parser')
+    table = soup.table
 
-    rows = soup.table.tbody.find_all('tr')
+    headers = ['sig_candidate_id'] + [th.get_text(strip=True)
+                                      for th in table.thead.find_all('th')]
 
-    records = []
+    def get_text(x): return x.get_text(strip=True)
 
-    for row in tqdm(rows, desc=f'Extracting from {response.url}'):
-        agc_candidate_id = row['onclick'].split('/')[-1].split('?')[0].strip()
-        row.td.span.decompose()
-        columns = [agc_candidate_id] + list(map(lambda td: td.text.strip(), 
-                                                row.find_all('td')))
-        records.append(dict(zip(headers, columns)))
+    extracted = []
 
-    return records
+    for tr in table.tbody.find_all('tr'):
+        candidate_url = urlparse(tr['onclick'].lstrip('document.location=').strip("'"))
+        sig_candidate_id = candidate_url.path.rpartition('/')[-1]
+        columns = tr.find_all('td')
+        columns[0].span.decompose()
+        row = [sig_candidate_id] + list(map(get_text, columns))
+        extracted.append(dict(zip(headers, row)))
+
+    return extracted
 
 
-def save_page(response):
+def save_html(page_source, filepath, *additional_info):
 
-    soup = BeautifulSoup(response.text, 'html.parser')
-    office = response.url.split('/')[-1].split('-')[-1].title()
+    soup = BeautifulSoup(page_source, 'html.parser')
 
-    if not os.path.isdir(f"{EXPORTDIR}/HTML_FILES"):
-        os.mkdir(f"{EXPORTDIR}/HTML_FILES")
+    filepath = Path(filepath) / 'HTML_FILES'
+    filepath.mkdir(exist_ok=True)
 
-    with open(f"{EXPORTDIR}/HTML_FILES/{TIMESTAMP}_NA_{GROUP_ABV}_Ratings_{office}.html", 'w') as f:
-        f.write(soup.prettify())
+    timestamp = datetime.strftime(datetime.now(), '%Y-%m-%d-%H%M%S-%f')
+
+    with open(filepath / f"Ratings_{'-'.join(map(str, additional_info))}"
+                         f"{'-' if additional_info else ''}{timestamp}.html", 'w') as f:
+        f.write(str(soup))
+
+
+def save_extract(extracted: dict[dict], filepath, *additional_info):
+
+    filepath = Path(filepath) / 'EXTRACT_FILES'
+    filepath.mkdir(exist_ok=True)
+
+    timestamp = datetime.strftime(datetime.now(), '%Y-%m-%d-%H%M%S-%f')
+
+    df = pandas.DataFrame.from_records(extracted)
+    df.to_csv(
+        filepath / f"Ratings-Extract_{'-'.join(map(str, additional_info))}"
+                   f"{'-' if additional_info else ''}{timestamp}.csv", index=False)
 
 
 def main():
+    chrome_service = Service('chromedriver')
+    chrome_options = Options()
+    chrome_options.add_argument('incognito')
+    chrome_options.add_argument('headless')
+    chrome_driver = webdriver.Chrome(
+        service=chrome_service, options=chrome_options)
 
-    response_senate = requests.get(f"{MAIN_URL}/members-senate")
-    response_house = requests.get(f"{MAIN_URL}/members-house")
+    urls = ('/members-house', '/members-senate')
 
-    senate_records = extract(response_senate)
-    house_records = extract(response_house)
+    extracted = []
 
-    save_page(response_senate)
-    save_page(response_house)
+    for url in urls:
+        chrome_driver.get(urljoin(URL, url))
+        extracted += extract(chrome_driver.page_source)
+        save_html(chrome_driver.page_source, EXPORT_DIR, url.strip('/'))
 
-    df = pandas.DataFrame.from_records(senate_records + house_records)
-    df.to_csv(f"{EXPORTDIR}/{TIMESTAMP}_NA_{GROUP_ABV}_Ratings-Extract.csv", index=False)
+    save_extract(extracted, EXPORT_DIR)
 
- 
+
 if __name__ == "__main__":
 
-    _, EXPORTDIR = sys.argv
-    EXPORTDIR = EXPORTDIR if os.path.isdir(EXPORTDIR) else os.path.dirname(EXPORTDIR)
+    import argparse
+
+    parser = argparse.ArgumentParser(prog='sig_webscrape')
+    parser.add_argument(
+        'exportdir', help='file directory of where the files exports to')
+    parser.add_argument('-f', '--htmldir', help='file directory of html files')
+
+    args = parser.parse_args()
+    EXPORT_DIR = args.exportdir
 
     main()

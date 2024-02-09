@@ -12,36 +12,36 @@ from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
-from selenium.common.exceptions import (TimeoutException, 
-                                        NoSuchElementException, 
+from selenium.common.exceptions import (TimeoutException,
+                                        NoSuchElementException,
                                         ElementClickInterceptedException)
 
 from bs4 import BeautifulSoup
 from datetime import datetime
 from pathlib import Path
 from tqdm import tqdm
+from urllib.parse import urljoin
 from collections import defaultdict
 
 
-FILENAME = "_Ratings"
-TIMESTAMP = datetime.strftime(datetime.now(), '%Y-%m-%d')
+def extract(driver: webdriver.Chrome, file: str = None, **columns):
 
-
-def extract(driver:webdriver.Chrome, file:str=None, **columns):
-    
     if file:
         soup = BeautifulSoup(file, 'html.parser')
     else:
         # sometimes webpage might take a while to load
         try:
-            WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.XPATH, "//div[@class='legislator-detail']")))
+            WebDriverWait(driver, 10).until(EC.presence_of_element_located(
+                (By.XPATH, "//div[@class='legislator-detail']")))
         except TimeoutException:
             pass
         soup = BeautifulSoup(driver.page_source, 'html.parser')
-        
-    last_segment_match = re.search(r"/+([^\W_]\w*)\W*$", driver.current_url) if driver else None
-    sig_candidate_id = last_segment_match.group(1) if last_segment_match else ""
-    
+
+    last_segment_match = re.search(
+        r"/+([^\W_]\w*)\W*$", driver.current_url) if driver else None
+    sig_candidate_id = last_segment_match.group(
+        1) if last_segment_match else ""
+
     name = soup.find('div', {'class': 'legislator-name'})
     info = soup.find('div', {'class': 'legislator-sub-head'})
     score_containers = soup.find_all('p', {'class': 'legislator-detail-score'})
@@ -52,11 +52,12 @@ def extract(driver:webdriver.Chrome, file:str=None, **columns):
     return {'sig_candidate_id': sig_candidate_id,
             'name': name.text.strip() if name else None,
             'info': info.text.strip() if info else None} \
-            | dict(zip(score_headers, scores)) \
-            | columns if columns else {} \
+        | dict(zip(score_headers, scores)) \
+        | columns if columns else {} \
 
 
-def extract_card(driver:webdriver.Chrome, file:str=None):
+
+def extract_card(driver: webdriver.Chrome, file: str = None):
 
     if file:
         soup = BeautifulSoup(file, 'html.parser')
@@ -67,66 +68,80 @@ def extract_card(driver:webdriver.Chrome, file:str=None):
 
     extracted = defaultdict(dict)
 
-    for card in container.find_all('div', {'class':'card'}):
+    for card in container.find_all('div', {'class': 'card'}):
         url = card.find('a')['href']
-        score = card.find('div', {'class':'score'})
-        party = card.find('div', {'class':'party'})
-        name = card.find('div', {'class':'name'})
-        info = card.find('div', {'class':'info'})
+        score = card.find('div', {'class': 'score'})
+        party = card.find('div', {'class': 'party'})
+        name = card.find('div', {'class': 'name'})
+        info = card.find('div', {'class': 'info'})
 
         last_segment_match = re.search(r"/+([^\W_]\w*)\W*$", url)
-        sig_candidate_id = last_segment_match.group(1) if last_segment_match else ""
-        
+        sig_candidate_id = last_segment_match.group(
+            1) if last_segment_match else ""
+
         extracted[url] = {'sig_candidate_id': sig_candidate_id,
                           'name': name.text.strip() if name else None,
-                          'party': party.find('div', {'class':'value'}).text if party else None,
+                          'party': party.find('div', {'class': 'value'}).text if party else None,
                           'info': " ".join([e.text for e in info]) if info else None,
-                          'score': score.find('div', {'class':'value'}).text if score else None}
+                          'score': score.find('div', {'class': 'value'}).text if score else None}
     return extracted
 
 
-def download_page(driver:webdriver.Chrome):
-
-    soup = BeautifulSoup(driver.page_source, 'html.parser')
-
-    last_segment_match = re.search(r"/+([^\W_]\w*)\W*$", driver.current_url)
-    sig_candidate_id = last_segment_match.group(1) if last_segment_match else ""
-
-    HTML_FILES.mkdir(exist_ok=True)
-
-    with open(HTML_FILES / f"{FILENAME}_{sig_candidate_id}-{TIMESTAMP}.html", 'w') as f:
-        f.write(soup.prettify())
-
-
-def extract_from_file(files:list, cards:bool=True):
+def extract_files(files: list, cards: bool = True):
 
     extracted = []
 
     for file in files:
-
         with open(file, 'r') as f:
             file_contents = f.read()
 
         if cards:
             # this gets the values (dictvalues=list) of the defaultdict(dict)
-            records += extract_card(driver=None, file=file_contents).values()
-
+            extracted += extract_card(driver=None, file=file_contents).values()
         else:
-            records.append(extract(driver=None, file=file_contents))
+            extracted.append(extract(driver=None, file=file_contents))
 
-    EXTRACT_FILES.mkdir(exist_ok=True)
+    return extracted
 
-    df = pandas.DataFrame.from_records(extracted)
-    df.to_csv(EXTRACT_FILES / f"{FILENAME}-Extract_{TIMESTAMP}.csv", index=False)
+
+def save_html(driver: webdriver.Chrome, filepath=None):
+
+    soup = BeautifulSoup(driver.page_source, 'html.parser')
+
+    last_segment_match = re.search(r"/+([^\W_]\w*)\W*$", driver.current_url)
+    sig_candidate_id = last_segment_match.group(
+        1) if last_segment_match else ""
+
+    filepath = Path(filepath) / \
+        'HTML_FILES' if filepath else Path('HTML_FILES')
+    filepath.mkdir(exist_ok=True)
+
+    timestamp = datetime.strftime(datetime.now(), '%Y-%m-%d-%H%M%S-%f')
+
+    with open(HTML_FILES / f"Ratings_{sig_candidate_id}-{timestamp}.html", 'w') as f:
+        f.write(str(soup))
+
+
+def save_extract(extracted: dict[dict], filepath=None):
+
+    filepath = Path(filepath) / \
+        'EXTRACT_FILES' if filepath else Path('EXTRACT_FILES')
+    filepath.mkdir(exist_ok=True)
+
+    timestamp = datetime.strftime(datetime.now(), '%Y-%m-%d-%H%M%S-%f')
+
+    df = pandas.DataFrame.from_dict(extracted, orient='index')
+    df.to_csv(filepath / f"Ratings-Extract_{timestamp}.csv", index=False)
 
 
 def main():
-    
-    chrome_service = Service('chromedriver')
+
+    chrome_service = Service()
     chrome_options = Options()
     chrome_options.add_argument('incognito')
-    chrome_options.add_argument('headless')
-    chrome_driver = webdriver.Chrome(service=chrome_service, options=chrome_options)
+    # chrome_options.add_argument('headless')
+    chrome_driver = webdriver.Chrome(
+        service=chrome_service, options=chrome_options)
 
     chrome_driver.get(URL)
 
@@ -134,10 +149,11 @@ def main():
     ActionChains(chrome_driver).send_keys(Keys.ESCAPE).perform()
 
     try:
-        WebDriverWait(chrome_driver,10).until(
-            EC.presence_of_element_located((By.XPATH, "//div[@id='legislators-container']//div[@class='pure-g legislator-list']"))
+        WebDriverWait(chrome_driver, 10).until(
+            EC.presence_of_element_located(
+                (By.XPATH, "//div[@id='legislators-container']//div[@class='pure-g legislator-list']"))
         )
-        
+
     except TimeoutException:
         print("Cannot find Legislator Container. Quitting...")
         chrome_driver.quit()
@@ -145,7 +161,8 @@ def main():
 
     while True:
         try:
-            pagination = chrome_driver.find_element(By.XPATH, "//div[@class='pagination pure-u-md-1 pure-u-lg-3-4']")
+            pagination = chrome_driver.find_element(
+                By.XPATH, "//div[@class='pagination pure-u-md-1 pure-u-lg-3-4']")
             pagination.click()
 
         except NoSuchElementException:
@@ -153,24 +170,20 @@ def main():
         except ElementClickInterceptedException:
             pass
 
-    extracted = []
+    extracted = {}
 
     card_records = extract_card(chrome_driver)
 
-    CURRENT_URL = chrome_driver.current_url
-
-    for candidate_url in tqdm(card_records):
+    for i, candidate_url in tqdm(enumerate(card_records), total=len(card_records)):
         # striping the '#' would prevent the session from redirecting itself
         card_info = card_records[candidate_url]['info']
-        chrome_driver.get(f"{CURRENT_URL.rstrip('#/')}{candidate_url}")
-        extracted.append(extract(chrome_driver, card_info=card_info))
-        download_page(chrome_driver)
+        chrome_driver.get(urljoin(chrome_driver.current_url, candidate_url))
 
-    EXTRACT_FILES.mkdir(exist_ok=True)
+        extracted[i] = extract(chrome_driver, card_info=card_info)
+        save_html(chrome_driver, filepath=EXPORT_DIR)
 
-    df = pandas.DataFrame.from_records(extracted)
-    df.to_csv(EXTRACT_FILES / f"{FILENAME}-Extract_{TIMESTAMP}.csv", index=False)
-    
+    save_extract(extracted, filepath=EXPORT_DIR)
+
 
 if __name__ == '__main__':
     _, EXPORT_DIR, URL, *FILES = sys.argv
@@ -181,8 +194,8 @@ if __name__ == '__main__':
 
     if FILES:
         if len(FILES) == 1:
-            extract_from_file(FILES, cards=True)
+            extract_files(FILES, cards=True)
         else:
-            extract_from_file(FILES, cards=False)
+            extract_files(FILES, cards=False)
     else:
         main()

@@ -1,124 +1,153 @@
 # This is the webscraping script for American Conservative Union (ACU), sig_id=1482
 
-import sys
-import os
+from pathlib import Path
+from datetime import datetime
+from urllib.parse import urljoin
+
 import pandas
-from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
-from datetime import datetime
+from bs4 import BeautifulSoup
 from tqdm import tqdm
 
 
-MAIN_URL = "http://ratings.conservative.org/people"
-TIMESTAMP = datetime.now().strftime('%Y-%m-%d')
-
-URL_FILTERS = {'year': 'year=',
-               'state': 'state=',
-               'party': 'party=',
-               'office': 'chamber=',
-               'limit': 'limit=',
-               'level': 'level='}
-                 
-STATES = ['AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA', 'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 
-          'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ', 'NM', 'NY', 'NC', 'ND', 
-          'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY', 'US']
+URL = "http://ratings.conservative.org/people"
 
 
-def apply_url_filter(**filters):
-    f = '&'.join([URL_FILTERS[k] + v for k, v in filters.items()])
-    return '?'.join([MAIN_URL, f])
+"""
+Filters:
+
+Year (year): The year that the rating is in
+State (state): Shows the state that the legislators are in
+Party (party): 'R'(republican), 'D'(democratic), 'I'(independent)
+Office (chamber): 'H'(house), 'S'(senate), 'A'(assembly)
+Results per page (limit): How many results of legislators to show on page, 'all' for everything.
+Coverage (level): 'federal' or 'state' or 'both'
+
+"""
+
+# All 50 states and 'US' for nationwide
+STATES = ['AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA',
+          'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD',
+          'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ',
+          'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC',
+          'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY',
+          'US']
 
 
-def get_url_param(url, param=None):
-    params = url.split('?')[1].split('&')
-    params_dict = {p.split('=')[0]:p.split('=')[1] for p in params}
-
-    if param and param in params_dict.keys():
-        return params_dict[param]
+def url_query(**filters):
+    query = '&'.join((f"{k}={v}" for k, v in filters.items()))
+    return urljoin(URL, f"?{query}")
 
 
-def extract(driver):
+def extract(page_source, **additional_info):
 
-    soup = BeautifulSoup(driver.page_source, 'html.parser')
-    candidates = soup.find_all('div', {'class': 'sc-hzDkRC'})
-    geo_coverage = get_url_param(driver.current_url, 'state')
+    soup = BeautifulSoup(page_source, 'html.parser')
+    rows = soup.find_all('div', {'class': 'sc-hzDkRC'})
 
     records = []
-    
-    for candidate in candidates:
 
-        name_party, office_state_district = candidate.find('div', {'class':'sc-fBuWsC'}).find_all('p')
-        rating = candidate.find('div', {'class':'sc-gPEVay'})
+    for row in rows:
 
-        records.append({'sig_candidate_id': candidate.a['href'].split('/')[-1].strip(),
-                        'name_party': name_party.text if name_party else '  ',
-                        'office_state': office_state_district.a.text,
-                        'district:': office_state_district.a.next_sibling,
-                        'rating': rating.text if rating else 'No Rating',
-                        'geo_coverage': geo_coverage})
+        name_party, other_info = row.find(
+            'div', {'class': 'sc-fBuWsC'}).find_all('p')
+        rating = row.find('span', {'class': 'sc-gipzik'})
+        lifetime_rating = row.find('div', {'class': 'sc-gPEVay'})
+
+        records.append({'sig_candidate_id': row.a['href'].rpartition('/')[-1],
+                        'name_party': name_party.get_text(strip=True),
+                        'other_info': other_info.get_text(strip=True),
+                        'rating': rating.get_text(strip=True) if rating else None,
+                        'lifetime_rating': lifetime_rating.get_text(strip=True) if lifetime_rating else None,
+                        } | additional_info)
 
     return records
 
 
-def export_records(records):
-    df = pandas.DataFrame.from_records(records)
-    df.to_csv(f"{EXPORTDIR}/{YEAR}_Ratings-Extract_{TIMESTAMP}.csv", index=False)
- 
+def save_extract(extracted: list[dict], filepath, *additional_info):
 
-def download_page(driver):
+    filepath = Path(filepath) / 'EXTRACT_FILES'
+    filepath.mkdir(exist_ok=True)
 
-    if not os.path.isdir(f"{EXPORTDIR}/HTML_FILES"):
-        os.mkdir(f"{EXPORTDIR}/HTML_FILES")
+    timestamp = datetime.strftime(datetime.now(), '%Y-%m-%d-%H%M%S-%f')
 
-    soup = BeautifulSoup(driver.page_source, 'html.parser')
-    geo_coverage = get_url_param(driver.current_url, 'state')
-
-    filename = f"Ratings_{geo_coverage}-{TIMESTAMP}.html"
-
-    with open(f"{EXPORTDIR}/HTML_FILES/{filename}", 'w') as f:
-        f.write(soup.prettify())
+    df = pandas.DataFrame.from_records(extracted)
+    df.to_csv(
+        filepath / f"Ratings-Extract_{'-'.join(map(str, additional_info))}"
+                   f"{'-' if additional_info else ''}{timestamp}.csv", index=False)
 
 
-def main():
+def save_html(page_source, filepath, *additional_info):
+    soup = BeautifulSoup(page_source, 'html.parser')
 
-    chrome_service = Service('chromedriver')
-    chrome_options = webdriver.ChromeOptions()
+    filepath = Path(filepath) / 'HTML_FILES'
+    filepath.mkdir(exist_ok=True)
+
+    timestamp = datetime.strftime(datetime.now(), '%Y-%m-%d-%H%M%S-%f')
+
+    with open(filepath / f"Ratings_{'-'.join(map(str, additional_info))}"
+                         f"{'-' if additional_info else ''}{timestamp}.html", 'w') as f:
+        f.write(str(soup))
+
+
+def main(year, export_dir, states):
+
+    chrome_service = Service()
+    chrome_options = Options()
     chrome_options.add_argument('incognito')
-    driver = webdriver.Chrome(service=chrome_service, options=chrome_options)
+    chrome_options.add_argument('headless')
+    chrome_driver = webdriver.Chrome(
+        service=chrome_service, options=chrome_options)
 
-    records_by_state = []
+    extracted = []
 
-    for state in tqdm(STATES):
+    p_bar = tqdm(states, desc='State')
 
-        filtered_URL = apply_url_filter(year=YEAR, state=state, limit='all', level='state')
+    for state in states:
+        
+        p_bar.desc = state
 
-        driver.get(filtered_URL)
+        url_with_query = url_query(year=year, state=state, limit='all', level='state')
 
-        try: 
-            WebDriverWait(driver, 15).until(
-                EC.visibility_of_element_located((By.XPATH, "//div[@class='sc-kXeGPI lmbiWA']"))
-                )
+        chrome_driver.get(url_with_query)
+
+        try:
+            WebDriverWait(chrome_driver, 30).until(
+                EC.visibility_of_element_located(
+                    (By.XPATH, "//div[@class='sc-kXeGPI lmbiWA']"))
+            )
 
         except TimeoutException:
             print(f"{state} has a timeout.")
             continue
 
-        extracted = extract(driver)
+        extracted += extract(chrome_driver.page_source, state=state)
+        save_html(chrome_driver.page_source, export_dir, state)
 
-        if extracted:
-            records_by_state += extracted
-            download_page(driver)
-    
-    export_records(records_by_state)
+        p_bar.update(1)
 
-    driver.quit()
+    if extracted:
+        save_extract(extracted, export_dir)
+
+    chrome_driver.quit()
 
 
 if __name__ == '__main__':
-    script, YEAR, EXPORTDIR = sys.argv
-    main()
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        prog='American Conservative Union ratings extractor')
+    
+    parser.add_argument('-y', '--year', type=int, required=True)
+    parser.add_argument('-d', '--exportdir', type=Path, required=True)
+    parser.add_argument('-s', '--states', nargs='*')
+    parser.add_argument('-f', '--files', type=Path)
+
+    args = parser.parse_args()
+
+    main(args.year, args.exportdir, states=args.states or STATES)

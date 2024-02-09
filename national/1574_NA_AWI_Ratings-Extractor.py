@@ -1,86 +1,138 @@
-# This is the webscraping script for Animal Welfare Institute (AWI), sig_id=1574
 
-import time
 import pandas
-import sys
 
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import Select
+from selenium.webdriver.common.action_chains import ActionChains
+from selenium.common.exceptions import NoSuchElementException
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait, Select
+
 from bs4 import BeautifulSoup
+from datetime import datetime
+from pathlib import Path
 
 
 URL = "https://awionline.org/compassion-index#/legislators"
 
-TO_SELECT = ['117-Senate', '117-House']
+
+def extract(page_source):
+
+    soup = BeautifulSoup(page_source, 'html.parser')
+    table = soup.find('table', {'class': 'congressweb-module-listTable'})
+
+    headers = [th.get_text(strip=True) for th in table.find_all('th')]
+    rows = [tr.find_all('td') for tr in table.find_all('tr')[1:]]
+
+    def get_text(x): return x.get_text(strip=True, separator=' ')
+
+    return [dict(zip(headers, map(get_text, row))) for row in rows]
 
 
-def extract(soup):
+def extract_files(files: list):
 
-    rows = soup.table.tbody.find_all('tr')
+    extracted = []
 
-    records = []
-    
-    for tr in rows[1:]:
-        info, rating = tr.find_all('td')
+    for file in files:
 
-        name = info.a if info else None
-        party_state_district = info.find('div', {'class': 'congressweb-legislator-sub-content'}) if rating else None
+        with open(file, 'r') as f:
+            extracted += extract(f.read())
 
-        records.append({'name': name.text.strip() if name else None,
-                        'party-state-district': party_state_district.text.strip() if party_state_district else None,
-                        'score': rating.text.strip()})
-
-    return records
+    return extracted
 
 
-def download_page(driver, session):
-    soup = BeautifulSoup(driver.page_source, 'html.parser')
+def save_html(page_source, filepath=None):
 
-    with open(f'{EXPORTDIR}/{session}_NA_AWI_Ratings.html', 'w') as f:
-        f.write(soup.prettify())
+    soup = BeautifulSoup(page_source, 'html.parser')
+    filepath = Path(filepath) / \
+        'HTML_FILES' if filepath else Path('HTML_FILES')
+    filepath.mkdir(exist_ok=True)
+
+    timestamp = datetime.strftime(datetime.now(), '%Y-%m-%d-%H%M%S-%f')
+
+    with open(filepath / f"Ratings_{timestamp}.html", 'w') as f:
+        f.write(str(soup))
+
+
+def save_extract(extracted: dict[dict], filepath=None, *additional_info):
+
+    filepath = Path(filepath) / \
+        'EXTRACT_FILES' if filepath else Path('EXTRACT_FILES')
+    filepath.mkdir(exist_ok=True)
+
+    timestamp = datetime.strftime(datetime.now(), '%Y-%m-%d-%H%M%S-%f')
+
+    df = pandas.DataFrame.from_records(extracted)
+    df.to_csv(
+        filepath / f"Ratings-Extract_{'-'.join(map(str, additional_info))}-{timestamp}.csv", index=False)
 
 
 def main():
 
     chrome_service = Service('chromedriver')
-    chrome_options = webdriver.ChromeOptions()
+    chrome_options = Options()
     chrome_options.add_argument('incognito')
-    driver = webdriver.Chrome(service=chrome_service, options=chrome_options)
-    driver.get(URL)
+    # chrome_options.add_argument('headless')
+    chrome_driver = webdriver.Chrome(
+        service=chrome_service, options=chrome_options)
 
-    combined_records = []
+    chrome_driver.get(URL)
 
-    for session in TO_SELECT:
+    to_select = ['118-Senate', '118-House']
 
-        driver.refresh()
+    # close overlay
+    ActionChains(chrome_driver).send_keys(Keys.ESCAPE).perform()
 
-        time.sleep(3)
+    extracted = []
 
-        iframe = driver.find_element(By.TAG_NAME, 'iframe')
-        driver.switch_to.frame(iframe)
+    for session in to_select:
 
-        select_congress = Select(driver.find_element(By.XPATH, "//select[@name='congress_chamber']"))
-        button_congress = driver.find_element(By.XPATH, "//form[@action='/AWI/legislators/membercompassionindex']//input")
-        
-        select_congress.select_by_value(session)
-        button_congress.click()
+        chrome_driver.refresh()
 
-        time.sleep(3)
+        iframe = WebDriverWait(chrome_driver, 10).until(EC.presence_of_element_located(
+            (By.XPATH, "//div[@id='iframe']//iframe")))
 
-        soup = BeautifulSoup(driver.page_source, 'html.parser')
-        
-        download_page(driver, session)
-        
-        combined_records += extract(soup)
+        chrome_driver.switch_to.frame(iframe)
 
-        time.sleep(3)
+        select = Select(chrome_driver.find_element(
+            By.XPATH, "//select[@name='congress_chamber']"))
+        button = chrome_driver.find_element(
+            By.XPATH, "//form[@action='/AWI/legislators/membercompassionindex']//input[@class='congressweb-button']")
 
-    df = pandas.DataFrame.from_records(combined_records)
-    df.to_csv(f'{EXPORTDIR}/_NA_AWI_Ratings-Extract.csv', index=False)
-        
+        select.select_by_value(session)
+        button.click()
+
+        WebDriverWait(chrome_driver, 10).until(EC.presence_of_element_located(
+            (By.XPATH, "//table[@class='congressweb-module-listTable']")
+        ))
+
+        extracted += extract(chrome_driver.page_source)
+        save_html(chrome_driver.page_source, export_dir)
+
+    return extracted
+
 
 if __name__ == '__main__':
-    _, EXPORTDIR = sys.argv
-    main()
+    import argparse
+
+    parser = argparse.ArgumentParser(prog='sig_webscrape')
+    parser.add_argument(
+        'exportdir', help='file directory of where the files exports to')
+    parser.add_argument('-f', '--htmldir', help='file directory of html files')
+
+    args = parser.parse_args()
+    export_dir = Path(args.exportdir)
+
+    if args.htmldir:
+        html_dir = Path(args.htmldir)
+        html_files = filter(lambda f: f.name.endswith(
+            '.html'), (export_dir/html_dir).iterdir())
+        extracted = extract_files(
+            sorted(html_files, key=lambda x: x.stat().st_ctime))
+    else:
+        extracted = main()
+
+    save_extract(extracted, export_dir)

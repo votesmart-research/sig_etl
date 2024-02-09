@@ -1,70 +1,97 @@
 # This is the webscraping script for Progressive Punch, sig_id=2167
 
-import os
 import sys
-import pandas
-
+from pathlib import Path
 from datetime import datetime
+
+import pandas
 from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
 
 
 URL = "https://www.progressivepunch.org/scores.htm"
-TIMESTAMP = datetime.now().strftime('%Y-%m-%d')
 
 
-def extract(soup):
+def extract(page_source):
+    soup = BeautifulSoup(page_source, 'html.parser')
+
     header_section, body = soup.find_all('table', {'id': 'all-members'})
-    
-    info_headers = header_section.find('tr', {'class': 'heading'}).find_all('td')
-    sub_headers = header_section.find('tr', {'class': 'subheading'}).find_all('td')
 
-    header_text = list(map(lambda td: td.text.strip() if td else None, info_headers[:4] + sub_headers[6:8]))
+    info_headers = header_section.find(
+        'tr', {'class': 'heading'}).find_all('td')
+    sub_headers = header_section.find(
+        'tr', {'class': 'subheading'}).find_all('td')
 
-    rows = body.find_all('tr')
+    header_text = [td.get_text(strip=True) if td else None
+                   for td in info_headers[:4] + sub_headers[6:8]]
 
     records = []
 
-    for row in rows:
+    for row in body.find_all('tr'):
         columns = row.find_all('td')
-        column_text = [td.text.strip() for td in columns[:4] + columns[6:8]]
+        column_text = [td.get_text(strip=True)
+                       for td in columns[:4] + columns[6:8]]
         records.append(dict(zip(header_text, column_text)))
 
     return records
 
 
-def download_page(driver):
+def save_html(page_source, filepath, *additional_info):
 
-    if not os.path.isdir(f"{EXPORT_DIR}/HTML_FILES"):
-        os.mkdir(f"{EXPORT_DIR}/HTML_FILES")
+    soup = BeautifulSoup(page_source, 'html.parser')
 
-    soup = BeautifulSoup(driver.page_source, 'html.parser')
-    filename = "_NA_ProgressivePunch_Ratings_{TIMESTAMP}.html"
+    filepath = Path(filepath) / 'HTML_FILES'
+    filepath.mkdir(exist_ok=True)
 
-    with open(f"{EXPORT_DIR}/HTML_FILES/{filename}", 'w') as f:
-        f.write(soup.prettify())
+    timestamp = datetime.strftime(datetime.now(), '%Y-%m-%d-%H%M%S-%f')
+
+    with open(filepath / f"Ratings_{'-'.join(map(str, additional_info))}"
+                         f"{'-' if additional_info else ''}{timestamp}.html", 'w') as f:
+        f.write(str(soup))
+
+
+def save_extract(extracted: dict[dict], filepath, *additional_info):
+
+    filepath = Path(filepath) / 'EXTRACT_FILES'
+    filepath.mkdir(exist_ok=True)
+
+    timestamp = datetime.strftime(datetime.now(), '%Y-%m-%d-%H%M%S-%f')
+
+    df = pandas.DataFrame.from_records(extracted)
+    df.to_csv(
+        filepath / f"Ratings-Extract_{'-'.join(map(str, additional_info))}"
+                   f"{'-' if additional_info else ''}{timestamp}.csv", index=False)
 
 
 def main():
 
     chrome_service = Service('chromedriver')
-    chrome_options = webdriver.ChromeOptions()
+    chrome_options = Options()
     chrome_options.add_argument('incognito')
     chrome_options.add_argument('headless')
-    driver = webdriver.Chrome(service=chrome_service, options=chrome_options)
+    chrome_driver = webdriver.Chrome(
+        service=chrome_service, options=chrome_options)
 
-    driver.get(URL)
-    soup = BeautifulSoup(driver.page_source, 'html.parser')
+    chrome_driver.get(URL)
 
-    records = extract(soup)
-    download_page(driver)
+    records = extract(chrome_driver.page_source)
 
-    df = pandas.DataFrame.from_records(records)
-    df.to_csv(f"{EXPORT_DIR}/_NA_ProgressivePunch_Ratings-Extract_{TIMESTAMP}.csv", index=False)
+    save_extract(records, filepath=EXPORT_DIR)
+    save_html(chrome_driver.page_source, filepath=EXPORT_DIR)
 
 
 if __name__ == "__main__":
-    _, EXPORT_DIR = sys.argv
-    main()
+    import argparse
 
+    parser = argparse.ArgumentParser(prog='sig_webscrape')
+    parser.add_argument(
+        'exportdir', help='file directory of where the files exports to')
+    parser.add_argument('-f', '--htmldir', help='file directory of html files')
+
+    args = parser.parse_args()
+
+    EXPORT_DIR = Path(args.exportdir)
+
+    main()

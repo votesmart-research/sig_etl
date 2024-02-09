@@ -1,40 +1,43 @@
 
-import re
+import time
 from datetime import datetime
 from pathlib import Path
 
+
 import pandas
+from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.by import By
-from selenium.webdriver.common.action_chains import ActionChains
-from selenium.webdriver.support.wait import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from bs4 import BeautifulSoup
+from selenium.webdriver.support.ui import WebDriverWait
+from tqdm import tqdm
 
-URL = "https://libertyscore.conservativereview.com/"
+
+URL = "https://hslf.org/current_scorecard"
 
 
 def extract(page_source):
 
     soup = BeautifulSoup(page_source, 'html.parser')
 
-    table = soup.find('table', {'id': 'repsTable'})
-    headers = [th.div.text for th in table.thead.find_all('th')]
+    rep_container = soup.find('div', {'id': 'rep'})
+    info_container = rep_container.find(
+        'div', {'class': 'detail'}) if rep_container else None
+    info = info_container.find(
+        'span', {'class': 'eyebrow'}) if info_container else None
+    name = info_container.find('h2') if info_container else None
 
-    rows = [tr.find_all('td') for tr in table.tbody.find_all('tr')]
-    def get_text(x): return x.text.strip()
-    extracted = []
+    score_container = rep_container.find('div', {'class': 'score'})
+    score_heading = [strong.get_text(strip=True)
+                     for strong in score_container.find_all('strong')]
+    score_text = [em.get_text(strip=True)
+                  for em in score_container.find_all('em')]
+    scores = dict(zip(score_heading, score_text))
 
-    for row in rows:
-        info_1 = dict(zip(headers[:2], map(get_text, row[:2])))
-        party = re.sub(r".svg|.png", "", row[2].img['src'].split('/')[-1])
-        info_2 = dict(zip(headers[3:], map(get_text, row[3:])))
-        extracted.append(info_1 | {'party': party} | info_2)
-
-    return extracted
+    return {'name': name.get_text(strip=True) if name else None,
+            'info': info.get_text(strip=True) if info else None} | scores
 
 
 def extract_files(files: list):
@@ -43,7 +46,9 @@ def extract_files(files: list):
 
     for file in files:
         with open(file, 'r') as f:
-            extracted += extract(f.read())
+            extracted.append(extract(f.read()))
+
+    return extracted
 
 
 def save_html(page_source, filepath, *additional_info):
@@ -83,31 +88,28 @@ def main():
         service=chrome_service, options=chrome_options)
 
     chrome_driver.get(URL)
+    rows = WebDriverWait(chrome_driver, 10).until(EC.presence_of_all_elements_located(
+        (By.XPATH, "//table[@class='scorecard_table']/tbody/tr")))
 
-    WebDriverWait(chrome_driver, 10).until(
-        EC.presence_of_element_located((By.ID, 'repsTable'))
-    )
+    filtered_rows = filter(
+        lambda tr: 'state-label' not in tr.get_attribute('class'), rows)
 
-    # close overlay
-    ActionChains(chrome_driver).send_keys(Keys.ESCAPE).perform()
-
-    save_html(chrome_driver.page_source, EXPORT_DIR)
     extracted = []
-
-    while True:
-        next_button = chrome_driver.execute_script(
-            """
-            return document.querySelector("button[aria-label='Go to next page']")
-            """)
-
-        if next_button:
-            next_button.click()
-            extracted += extract(chrome_driver.page_source)
-            save_html(chrome_driver.page_source, EXPORT_DIR)
-        else:
-            break
+    for tr in tqdm(list(filtered_rows)):
+        row = WebDriverWait(chrome_driver, 10).until(EC.visibility_of_element_located(
+            (By.XPATH, f"//tr[@id='{tr.get_attribute('id')}']")
+        ))
+        row.click()
+        extracted.append(extract(chrome_driver.page_source))
+        save_html(chrome_driver.page_source, export_dir)
+        time.sleep(0.8)
+        back_to_list = WebDriverWait(chrome_driver, 10).until(EC.visibility_of_element_located(
+            (By.XPATH, "//a[@class='back-to-list']")))
+        back_to_list.click()
+        time.sleep(1)
 
     return extracted
+
 
 if __name__ == '__main__':
     import argparse
@@ -119,15 +121,14 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    EXPORT_DIR = Path(args.exportdir)
-
+    export_dir = Path(args.exportdir)
     if args.htmldir:
         html_dir = Path(args.htmldir)
         html_files = filter(lambda f: f.name.endswith(
-            '.html'), (EXPORT_DIR/html_dir).iterdir())
+            '.html'), (export_dir/html_dir).iterdir())
         extracted = extract_files(
             sorted(html_files, key=lambda x: x.stat().st_ctime))
     else:
         extracted = main()
 
-    save_extract(extracted, EXPORT_DIR)
+    save_extract(extracted, export_dir)
