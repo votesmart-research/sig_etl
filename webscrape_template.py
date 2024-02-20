@@ -102,7 +102,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(prog='sig_webscrape')
     parser.add_argument('-u', '--url', type=Path, required=True,
                         help='website url where the ratings are located')
-    parser.add_argument('-e', '--exportdir', type=Path, required=True,
+    parser.add_argument('-d', '--exportdir', type=Path, required=True,
                         help='file directory of where the files exports to')
     parser.add_argument('-f', '--htmldir', type=Path,
                         help='file directory of html files to read')

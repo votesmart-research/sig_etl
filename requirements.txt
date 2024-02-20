@@ -3,3 +3,4 @@ selenium
 pandas
 requests
 tqdm
+git+ssh://git@github.com/jtai-dev/tabular_matcher.git#egg=tabular_matcher

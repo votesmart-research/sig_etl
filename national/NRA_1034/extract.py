@@ -1,4 +1,3 @@
-
 # Built-ins
 import time
 import json
@@ -17,49 +16,61 @@ from selenium.webdriver.chrome.options import Options
 
 URL = "https://www.nrapvf.org"
 PDF_PREFIX = "NRA-PVF _ Grades _ "
-YEAR = datetime.strftime(datetime.now(), '%Y')
-TIMESTAMP = datetime.strftime(datetime.now(), '%Y-%m-%d-%H%M')
-FILENAME = f"{YEAR}_NA_NRA_Ratings{'{filetype}'}_{'{additional_info}'}{TIMESTAMP}.{'{ext}'}"
+YEAR = datetime.strftime(datetime.now(), "%Y")
+TIMESTAMP = datetime.strftime(datetime.now(), "%Y-%m-%d-%H%M")
+FILENAME = (
+    f"{YEAR}_NA_NRA_Ratings{'{filetype}'}_{'{additional_info}'}{TIMESTAMP}.{'{ext}'}"
+)
 
 
 def extract(page_source, **additional_info):
 
-    soup = BeautifulSoup(page_source, 'html.parser')
-    election_groups = soup.find_all('div', {'class': 'election-group'})
+    soup = BeautifulSoup(page_source, "html.parser")
+    election_groups = soup.find_all("div", {"class": "election-group"})
 
     extracted = []
 
     def _print_candidate(soup: BeautifulSoup):
-        candidate_endorsed = soup.find(
-            'div', {'class': 'candidate-endorsed'}).find('img')
+        candidate_endorsed = soup.find("div", {"class": "candidate-endorsed"}).find(
+            "img"
+        )
 
-        return {'candidate_name': soup.find('div', {'class': 'candidate-name'}).text.strip('*'),
-                'candidate_grade': soup.find('div', {'class': 'candidate-grade'}).text,
-                'candidate_endorsed': 'True' if candidate_endorsed else False,
-                'candidate_status': soup.find('div', {'class': 'candidate-incumbent'}).text}
+        return {
+            "candidate_name": soup.find("div", {"class": "candidate-name"}).text.strip(
+                "*"
+            ),
+            "candidate_grade": soup.find("div", {"class": "candidate-grade"}).text,
+            "candidate_endorsed": "True" if candidate_endorsed else False,
+            "candidate_status": soup.find("div", {"class": "candidate-incumbent"}).text,
+        }
 
     def _election_position(soup: BeautifulSoup):
-        print_candidates = soup.find_all('div', {'class': 'print-candidate'})
+        print_candidates = soup.find_all("div", {"class": "print-candidate"})
 
         for candidate in print_candidates:
-            yield _print_candidate(candidate) | \
-                {'election_location': soup.find(
-                    'div', {'class': 'election-location'}).text}
+            yield _print_candidate(candidate) | {
+                "election_location": soup.find(
+                    "div", {"class": "election-location"}
+                ).text
+            }
 
     def _election_group(soup: BeautifulSoup):
         election_positions = soup.find_all(
-            'div', {'class': 'election-position-container'})
+            "div", {"class": "election-position-container"}
+        )
 
         for election_position in election_positions:
             for candidate in _election_position(election_position):
-                yield candidate | {'election_type': soup.parent.parent['id'],
-                                   'election_date': soup.find('div', {'class': 'election-date'}).text}
+                yield candidate | {
+                    "election_type": soup.parent.parent["id"],
+                    "election_date": soup.find("div", {"class": "election-date"}).text,
+                }
 
     for group in election_groups:
         for candidate in _election_group(group):
-            extracted.append(candidate |
-                             {'collected': str(datetime.now())} |
-                             additional_info)
+            extracted.append(
+                candidate | {"collected": str(datetime.now())} | additional_info
+            )
 
     return extracted
 
@@ -68,34 +79,39 @@ def save_html(page_source, file_directory: Path, **additional_info):
 
     file_directory.mkdir(exist_ok=True)
 
-    soup = BeautifulSoup(page_source, 'html.parser')
+    soup = BeautifulSoup(page_source, "html.parser")
 
-    html_filename = FILENAME.format(filetype='-Extract',
-                                    additional_info=f'{"-".join(additional_info.values())}-',
-                                    ext='html')
+    html_filename = FILENAME.format(
+        filetype="-Extract",
+        additional_info=f'{"-".join(additional_info.values())}-',
+        ext="html",
+    )
 
-    with open(file_directory / html_filename, 'w') as f:
+    with open(file_directory / html_filename, "w") as f:
         f.write(soup.prettify())
 
 
-def save_extracted(records_extracted: dict[int, dict[str, str]], 
-                   file_directory: Path, 
-                   **additional_info):
+def save_extracted(
+    records_extracted: dict[int, dict[str, str]],
+    file_directory: Path,
+    **additional_info,
+):
 
     file_directory.mkdir(exist_ok=True)
 
-    extract_filename = FILENAME.format(filetype='-Extract',
-                                       additional_info=f'{"-".join(additional_info.values())}-',
-                                       ext='csv')
+    extract_filename = FILENAME.format(
+        filetype="-Extract",
+        additional_info=f'{"-".join(additional_info.values())}-',
+        ext="csv",
+    )
 
-    df = pandas.DataFrame.from_dict(records_extracted, orient='index')
+    df = pandas.DataFrame.from_dict(records_extracted, orient="index")
     df.to_csv(file_directory / extract_filename, index=False)
 
 
-def save_pdf(driver: webdriver.Chrome, 
-             file_directory: Path, 
-             timeout=10, 
-             **additional_info):
+def save_pdf(
+    driver: webdriver.Chrome, file_directory: Path, timeout=10, **additional_info
+):
 
     file_directory.mkdir(exist_ok=True)
 
@@ -108,9 +124,9 @@ def save_pdf(driver: webdriver.Chrome,
     second_button.click()
 
     pdf_filename = f"{PDF_PREFIX}{additional_info.get('state')}.pdf"
-    new_pdf_filename = FILENAME.format(filetype='',
-                                       additional_info=f'{"-".join(additional_info.values())}-',
-                                       ext='pdf')
+    new_pdf_filename = FILENAME.format(
+        filetype="", additional_info=f'{"-".join(additional_info.values())}-', ext="pdf"
+    )
 
     time_waited = 0
     while not (file_directory / pdf_filename).exists() and time_waited < timeout:
@@ -122,11 +138,11 @@ def save_pdf(driver: webdriver.Chrome,
 
 def get_active_states(page_source):
 
-    soup = BeautifulSoup(page_source, 'html.parser')
-    us_map = soup.find('svg', {'class', 'us-map'})
-    active_states = us_map.select('.state.state_hasElection')
+    soup = BeautifulSoup(page_source, "html.parser")
+    us_map = soup.find("svg", {"class", "us-map"})
+    active_states = us_map.select(".state.state_hasElection")
 
-    return sorted(set([path['data-fullname'] for path in active_states]))
+    return sorted(set([path["data-fullname"] for path in active_states]))
 
 
 def main(export_directory: Path):
@@ -137,27 +153,29 @@ def main(export_directory: Path):
 
     chrome_service = Service()
     chrome_options = Options()
-    chrome_options.add_argument('incognito')
-    chrome_options.add_argument('kiosk-printing')
+    chrome_options.add_argument("incognito")
+    chrome_options.add_argument("kiosk-printing")
 
     print_settings = {
-            "recentDestinations": [{
-                    "id": "Save as PDF",
-                    "origin": "local",
-                    "account": "",
-                }],
-                "selectedDestinationId": "Save as PDF",
-                "version": 2
+        "recentDestinations": [
+            {
+                "id": "Save as PDF",
+                "origin": "local",
+                "account": "",
             }
+        ],
+        "selectedDestinationId": "Save as PDF",
+        "version": 2,
+    }
 
     prefs = {
-        'printing.print_preview_sticky_settings.appState': json.dumps(print_settings),
-        'savefile.default_directory': str(PDF_FILES),
+        "printing.print_preview_sticky_settings.appState": json.dumps(print_settings),
+        "savefile.default_directory": str(PDF_FILES),
     }
     chrome_options.add_experimental_option("prefs", prefs)
-    
+
     chrome_driver = webdriver.Chrome(service=chrome_service, options=chrome_options)
-    chrome_driver.get(URL)  
+    chrome_driver.get(URL)
 
     time.sleep(3)
 
@@ -165,7 +183,7 @@ def main(export_directory: Path):
 
     for state in tqdm(get_active_states(chrome_driver.page_source)):
 
-        state_dash = "-".join(state.split(' '))
+        state_dash = "-".join(state.split(" "))
         chrome_driver.get(f"{URL}/grades/{state_dash}")
 
         extracted += extract(chrome_driver.page_source, state=state.title())
@@ -191,7 +209,7 @@ if __name__ == "__main__":
         required=True,
         help="File directory of where extracted files exports to",
     )
-    
+
     args = parser.parse_args()
 
     main(args.url, args.exportdir)

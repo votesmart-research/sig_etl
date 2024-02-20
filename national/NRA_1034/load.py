@@ -70,9 +70,11 @@ def query_from_database(query: str, connection, **params):
 def get_all_offices(connection):
     cursor = connection.cursor()
     cursor.execute(
-        """SELECT office_id, office.name
-                      FROM office
-                      ORDER BY rank ASC"""
+        """
+        SELECT office_id, office.name
+        FROM office
+        ORDER BY rank ASC
+    """
     )
     return {office_name: office_id for office_id, office_name in cursor.fetchall()}
 

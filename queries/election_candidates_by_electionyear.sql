@@ -5,6 +5,7 @@ Description: Queries candidates running for an election of a certain year, offic
 
 
 SELECT
+    DISTINCT ON (candidate.candidate_id)
     candidate.candidate_id,
     candidate.firstname,
     candidate.nickname,
@@ -41,7 +42,8 @@ WHERE
     
     AND office.office_id = ANY(%(office_ids)s)
 
-    AND (election_candidate.state_id = ANY(%(state_ids)s)
-            OR state.name = ANY(%(state_names)s)
+    AND (
+        election_candidate.state_id = ANY(%(state_ids)s)
+        OR state.name = ANY(%(state_names)s)
         )
 
