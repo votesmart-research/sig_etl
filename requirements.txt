@@ -1,6 +1,9 @@
 bs4
 selenium
+pg8000
 pandas
 requests
+rapidfuzz
 tqdm
+unidecode
 git+ssh://git@github.com/jtai-dev/tabular_matcher.git#egg=tabular_matcher

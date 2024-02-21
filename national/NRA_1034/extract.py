@@ -15,12 +15,8 @@ from selenium.webdriver.chrome.options import Options
 
 
 URL = "https://www.nrapvf.org"
-PDF_PREFIX = "NRA-PVF _ Grades _ "
-YEAR = datetime.strftime(datetime.now(), "%Y")
-TIMESTAMP = datetime.strftime(datetime.now(), "%Y-%m-%d-%H%M")
-FILENAME = (
-    f"{YEAR}_NA_NRA_Ratings{'{filetype}'}_{'{additional_info}'}{TIMESTAMP}.{'{ext}'}"
-)
+EXTRACT_PDF_PREFIX = "NRA-PVF _ Grades _ "
+FILENAME_PREFIX = f"{datetime.strftime(datetime.now(), "%Y")}_NA_NRA_{'{filename}'}"
 
 
 def extract(page_source, **additional_info):
@@ -75,45 +71,32 @@ def extract(page_source, **additional_info):
     return extracted
 
 
-def save_html(page_source, file_directory: Path, **additional_info):
-
-    file_directory.mkdir(exist_ok=True)
-
-    soup = BeautifulSoup(page_source, "html.parser")
-
-    html_filename = FILENAME.format(
-        filetype="-Extract",
-        additional_info=f'{"-".join(additional_info.values())}-',
-        ext="html",
-    )
-
-    with open(file_directory / html_filename, "w") as f:
-        f.write(soup.prettify())
-
-
-def save_extracted(
-    records_extracted: dict[int, dict[str, str]],
-    file_directory: Path,
-    **additional_info,
+def save_html(
+    page_source,
+    filename: str,
+    filepath: Path,
+    *additional_info,
 ):
 
-    file_directory.mkdir(exist_ok=True)
+    filepath.mkdir(exist_ok=True)
 
-    extract_filename = FILENAME.format(
-        filetype="-Extract",
-        additional_info=f'{"-".join(additional_info.values())}-',
-        ext="csv",
-    )
-
-    df = pandas.DataFrame.from_dict(records_extracted, orient="index")
-    df.to_csv(file_directory / extract_filename, index=False)
+    soup = BeautifulSoup(page_source, "html.parser")
+    timestamp = datetime.strftime(datetime.now(), "%Y-%m-%d-%H%M%S-%f")
+    
+    with open(filepath / (f"{filename}_{'-'.join(map(str, additional_info))}"
+                          f"{'-' if additional_info else ''}{timestamp}.html"), 
+              "w") as f:
+        f.write(str(soup))
 
 
 def save_pdf(
-    driver: webdriver.Chrome, file_directory: Path, timeout=10, **additional_info
+    driver: webdriver.Chrome,
+    filename: str,
+    filepath: Path,
+    *additional_info,
 ):
 
-    file_directory.mkdir(exist_ok=True)
+    filepath.mkdir(exist_ok=True)
 
     first_button = driver.find_element(By.CLASS_NAME, "btn-print-modal")
     first_button.click()
@@ -123,17 +106,36 @@ def save_pdf(
     second_button = driver.find_element(By.ID, "btn-print-voter-card")
     second_button.click()
 
-    pdf_filename = f"{PDF_PREFIX}{additional_info.get('state')}.pdf"
-    new_pdf_filename = FILENAME.format(
-        filetype="", additional_info=f'{"-".join(additional_info.values())}-', ext="pdf"
-    )
+    timestamp = datetime.strftime(datetime.now(), "%Y-%m-%d-%H%M%S-%f")
+
+    pdf_filename = f"{EXTRACT_PDF_PREFIX}{"".join(map(str, additional_info))}.pdf"
+    
+    new_pdf_filename = (f"{filename}_{'-'.join(map(str, additional_info))}"
+                        f"{'-' if additional_info else ''}{timestamp}")
 
     time_waited = 0
-    while not (file_directory / pdf_filename).exists() and time_waited < timeout:
+    while not (filepath / pdf_filename).exists() and time_waited < 10:
         time.sleep(2)
         time_waited += 2
 
-    (file_directory / pdf_filename).replace(file_directory / new_pdf_filename)
+    (filepath / pdf_filename).replace(filepath / f"{new_pdf_filename}.pdf")
+
+
+def save_records(
+    records: dict[int, dict[str, str]],
+    filename: str,
+    filepath: Path,
+    *additional_info,
+):
+
+    filepath.mkdir(exist_ok=True)
+    timestamp = datetime.strftime(datetime.now(), "%Y-%m-%d-%H%M%S-%f")
+
+    df = pandas.DataFrame.from_dict(records, orient="index")
+    df.to_csv(filepath / (f"{filename}_{'-'.join(map(str, additional_info))}"
+                          f"{'-' if additional_info else ''}{timestamp}.csv"),
+              index=False
+    )
 
 
 def get_active_states(page_source):
@@ -146,10 +148,6 @@ def get_active_states(page_source):
 
 
 def main(export_directory: Path):
-
-    EXTRACT_FILES = export_directory / "EXTRACT_FILES"
-    PDF_FILES = export_directory / "PDF_FILES"
-    HTML_FILES = export_directory / "HTML_FILES"
 
     chrome_service = Service()
     chrome_options = Options()
@@ -170,7 +168,7 @@ def main(export_directory: Path):
 
     prefs = {
         "printing.print_preview_sticky_settings.appState": json.dumps(print_settings),
-        "savefile.default_directory": str(PDF_FILES),
+        "savefile.default_directory": str(export_directory / "PDF_FILES"),
     }
     chrome_options.add_experimental_option("prefs", prefs)
 
@@ -187,13 +185,27 @@ def main(export_directory: Path):
         chrome_driver.get(f"{URL}/grades/{state_dash}")
 
         extracted += extract(chrome_driver.page_source, state=state.title())
-        save_html(chrome_driver.page_source, HTML_FILES, state=state.title())
-        save_pdf(chrome_driver, PDF_FILES, state=state.title())
+        save_html(
+            chrome_driver.page_source,
+            FILENAME_PREFIX.format(filename='Ratings'),
+            export_directory / "HTML_FILES",
+            state.title(),
+        )
+        save_pdf(
+            chrome_driver,
+            FILENAME_PREFIX.format(filename='Ratings'),
+            export_directory / "PDF_FILES",
+            state.title(),
+        )
 
     records_extracted = {k: v for k, v in enumerate(extracted)}
 
     # Export files
-    save_extracted(records_extracted, EXTRACT_FILES)
+    save_records(
+        records_extracted,
+        FILENAME_PREFIX.format(filename='Ratings-Extract'),
+        export_directory / "EXTRACT_FILES",
+    )
 
     return records_extracted
 
@@ -204,7 +216,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog="NRA webscrape")
     parser.add_argument(
         "-d",
-        "--exportdir",
+        "--export_dir",
         type=Path,
         required=True,
         help="File directory of where extracted files exports to",
@@ -212,4 +224,4 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    main(args.url, args.exportdir)
+    main(args.url, args.export_dir)
