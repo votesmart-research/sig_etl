@@ -1,5 +1,4 @@
-# Built-ins
-import json
+import os
 from pathlib import Path
 from datetime import datetime
 
@@ -12,22 +11,9 @@ from tqdm import tqdm
 from tabular_matcher.matcher import TabularMatcher
 
 
-FILENAME_PREFIX = f"{datetime.strftime(datetime.now(), "%Y")}_NA_NRA_{'{filename}'}"
-
-PACKAGE_DIR = Path(__file__).parent.parent.parent
-
-
-def connect_to_database():
-    filepath = PACKAGE_DIR / "conn_info_psycopg.json"
-
-    with open(filepath, "r") as f:
-        connection_info = json.load(f)
-
-    return psycopg.connect(**connection_info)
-
-
 def load_query_string(query_filename: Path):
-    filepath = PACKAGE_DIR / "queries" / f"{query_filename}.sql"
+    package_dir = Path(__file__).parent.parent.parent
+    filepath = package_dir / "queries" / f"{query_filename}.sql"
 
     with open(filepath, "r") as f:
         query_string = f.read()
@@ -95,27 +81,14 @@ def match(records_transformed: pandas.DataFrame, records_query: pandas.DataFrame
     return records_matched
 
 
-def save_records(
-    records: dict[int, dict[str, str]],
-    filename: str,
-    filepath: Path,
-    *additional_info,
-):
-
-    filepath.mkdir(exist_ok=True)
-    timestamp = datetime.strftime(datetime.now(), "%Y-%m-%d-%H%M%S-%f")
-
-    df = pandas.DataFrame.from_dict(records, orient="index")
-    df.to_csv(filepath / (f"{filename}_{'-'.join(map(str, additional_info))}"
-                          f"{'-' if additional_info else ''}{timestamp}.csv"),
-              index=False
-    )
-
-
-def main(records_transformed: dict[int, dict[str, str]], export_directory: Path):
-
+def main(records_transformed: dict[int, dict[str, str]], **module_vars):
+    
+    assert module_vars.get('VSDB_CONNECTION_INFO') != None #Please provide connection info to VoteSmart's database
+    
     print("Connecting...")
-    conn = connect_to_database()
+    
+    conn = psycopg.connect(**module_vars.get("VSDB_CONNECTION_INFO"))
+    
     print("Connected to database.")
 
     query_election_candidates = load_query_string("election_candidates_by_electionyear")
@@ -136,25 +109,14 @@ def main(records_transformed: dict[int, dict[str, str]], export_directory: Path)
 
     records_matched = match(records_transformed, records_election_candidates)
 
-    ## Export files
-    save_records(
-        records_election_candidates, 
-        FILENAME_PREFIX.format(filename='VSDB-Candidates'), 
-        filepath=export_directory / "QUERY_FILES",
-    )
-    save_records(
-        records_matched, 
-        FILENAME_PREFIX.format(filename='Ratings-Matched'), 
-        export_directory / "MATCHED_FILES"
-    )
-
     return records_matched, records_election_candidates
 
 
 if __name__ == "__main__":
 
     import argparse
-
+    from dotenv import load_dotenv
+    
     parser = argparse.ArgumentParser(prog="VoterVoice Load")
 
     parser.add_argument(
@@ -174,7 +136,15 @@ if __name__ == "__main__":
         help="file directory of where the files exports to",
     )
 
+    load_dotenv()
+
     args = parser.parse_args()
+    db_connection_info = {'host': os.getenv('VSDB_HOST'),
+                          'dbname': os.getenv('VSDB_DBNAME'),
+                          'port':os.getenv('VSDB_PORT'),
+                          'user':os.getenv('VSDB_USER'),
+                          'password':os.getenv('VSDB_PASSWORD'),
+                        }
 
     dfs = []
     for file in args.transformed_files:
@@ -185,4 +155,21 @@ if __name__ == "__main__":
     combined_dfs = pandas.concat(dfs, ignore_index=True)
     records_transformed = combined_dfs.to_dict(orient="index")
 
-    main(records_transformed, args.export_dir)
+    records_matched, records_election_candidates = main(records_transformed,
+                                                        VSDB_CONNECTION_INFO=db_connection_info)
+
+    timestamp = datetime.strftime(datetime.now(), "%Y-%m-%d-%H%M%S-%f")
+    filename_prefix = f"{datetime.strftime(datetime.now(), "%Y")}_NA_NRA_{'{filename}'}"
+
+    df_matched = pandas.DataFrame.from_dict(records_matched, orient="index")
+    df_matched.to_csv(
+        args.export_dir / f"{filename_prefix.format(filename='Ratings-Matched')}_{timestamp}.csv",
+        index=False
+    )
+    
+    df_election_candidates = pandas.DataFrame.from_dict(records_election_candidates, orient="index")
+    df_election_candidates.to_csv(
+        args.export_dir / f"{filename_prefix.format(filename='VSDB-Candidates')}_{timestamp}.csv",
+        index=False
+    )
+    

@@ -1,6 +1,5 @@
-# Built-ins
-import time
 import json
+import time
 from pathlib import Path
 from datetime import datetime
 
@@ -12,11 +11,6 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
-
-
-URL = "https://www.nrapvf.org"
-EXTRACT_PDF_PREFIX = "NRA-PVF _ Grades _ "
-FILENAME_PREFIX = f"{datetime.strftime(datetime.now(), "%Y")}_NA_NRA_{'{filename}'}"
 
 
 def extract(page_source, **additional_info):
@@ -77,7 +71,7 @@ def save_html(
     filepath: Path,
     *additional_info,
 ):
-
+    
     filepath.mkdir(exist_ok=True)
 
     soup = BeautifulSoup(page_source, "html.parser")
@@ -91,7 +85,8 @@ def save_html(
 
 def save_pdf(
     driver: webdriver.Chrome,
-    filename: str,
+    old_filename: str,
+    new_filename: str,
     filepath: Path,
     *additional_info,
 ):
@@ -108,9 +103,9 @@ def save_pdf(
 
     timestamp = datetime.strftime(datetime.now(), "%Y-%m-%d-%H%M%S-%f")
 
-    pdf_filename = f"{EXTRACT_PDF_PREFIX}{"".join(map(str, additional_info))}.pdf"
+    pdf_filename = f"{old_filename}{"".join(map(str, additional_info))}.pdf"
     
-    new_pdf_filename = (f"{filename}_{'-'.join(map(str, additional_info))}"
+    new_pdf_filename = (f"{new_filename}_{'-'.join(map(str, additional_info))}"
                         f"{'-' if additional_info else ''}{timestamp}")
 
     time_waited = 0
@@ -119,23 +114,6 @@ def save_pdf(
         time_waited += 2
 
     (filepath / pdf_filename).replace(filepath / f"{new_pdf_filename}.pdf")
-
-
-def save_records(
-    records: dict[int, dict[str, str]],
-    filename: str,
-    filepath: Path,
-    *additional_info,
-):
-
-    filepath.mkdir(exist_ok=True)
-    timestamp = datetime.strftime(datetime.now(), "%Y-%m-%d-%H%M%S-%f")
-
-    df = pandas.DataFrame.from_dict(records, orient="index")
-    df.to_csv(filepath / (f"{filename}_{'-'.join(map(str, additional_info))}"
-                          f"{'-' if additional_info else ''}{timestamp}.csv"),
-              index=False
-    )
 
 
 def get_active_states(page_source):
@@ -147,7 +125,11 @@ def get_active_states(page_source):
     return sorted(set([path["data-fullname"] for path in active_states]))
 
 
-def main(export_directory: Path):
+def main(url, **module_vars):
+    
+    assert module_vars.get('PDF_OLD_PREFIX') != None # Please provide prefix of the PDF old filename
+    assert module_vars.get('FILENAME_PREFIX') != None # Please provide the name in which the extract file will be saved
+    assert module_vars.get('EXPORT_DIR') != None # Please provide the export directory of this module
 
     chrome_service = Service()
     chrome_options = Options()
@@ -168,12 +150,12 @@ def main(export_directory: Path):
 
     prefs = {
         "printing.print_preview_sticky_settings.appState": json.dumps(print_settings),
-        "savefile.default_directory": str(export_directory / "PDF_FILES"),
+        "savefile.default_directory": str(module_vars.get('EXPORT_DIR') / "PDF_FILES"),
     }
+    
     chrome_options.add_experimental_option("prefs", prefs)
-
     chrome_driver = webdriver.Chrome(service=chrome_service, options=chrome_options)
-    chrome_driver.get(URL)
+    chrome_driver.get(url)
 
     time.sleep(3)
 
@@ -182,30 +164,24 @@ def main(export_directory: Path):
     for state in tqdm(get_active_states(chrome_driver.page_source)):
 
         state_dash = "-".join(state.split(" "))
-        chrome_driver.get(f"{URL}/grades/{state_dash}")
+        chrome_driver.get(f"{url}/grades/{state_dash}")
 
         extracted += extract(chrome_driver.page_source, state=state.title())
         save_html(
             chrome_driver.page_source,
-            FILENAME_PREFIX.format(filename='Ratings'),
-            export_directory / "HTML_FILES",
+            module_vars.get('FILENAME_PREFIX').format(filename='Ratings'),
+            module_vars.get('EXPORT_DIR') / "HTML_FILES",
             state.title(),
         )
         save_pdf(
             chrome_driver,
-            FILENAME_PREFIX.format(filename='Ratings'),
-            export_directory / "PDF_FILES",
+            module_vars.get('PDF_OLD_PREFIX'),
+            module_vars.get('FILENAME_PREFIX').format(filename='Ratings'),
+            module_vars.get('EXPORT_DIR') / "PDF_FILES",
             state.title(),
         )
 
     records_extracted = {k: v for k, v in enumerate(extracted)}
-
-    # Export files
-    save_records(
-        records_extracted,
-        FILENAME_PREFIX.format(filename='Ratings-Extract'),
-        export_directory / "EXTRACT_FILES",
-    )
 
     return records_extracted
 
@@ -223,5 +199,17 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
+    
+    filename_prefix = f"{datetime.strftime(datetime.now(), "%Y")}_NA_NRA_{'{filename}'}"
+    records_extracted = main("https://www.nrapvf.org",
+                             PDF_OLD_PREFIX = "NRA-PVF _ Grades _ ",
+                             FILENAME_PREFIX = filename_prefix,
+                             EXPORT_DIR = args.export_dir,
+                             )
 
-    main(args.url, args.export_dir)
+    timestamp = datetime.strftime(datetime.now(), "%Y-%m-%d-%H%M%S-%f")
+
+    df_extracted = pandas.DataFrame.from_dict(records_extracted, orient="index")
+    df_extracted.to_csv(
+        args.export_dir / f"{filename_prefix.format(filename='Ratings-Extract')}_{timestamp}.csv",
+        index=False)

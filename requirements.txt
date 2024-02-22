@@ -1,9 +1,11 @@
 bs4
 selenium
-pg8000
+psycopg
 pandas
 requests
 rapidfuzz
 tqdm
 unidecode
-git+ssh://git@github.com/jtai-dev/tabular_matcher.git#egg=tabular_matcher
+python-dotenv
+
+git+ssh://git@github.com/jtai-dev/record_matcher.git#egg=record_matcher

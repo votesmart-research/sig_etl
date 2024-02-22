@@ -1,4 +1,3 @@
-# Built-ins
 import re
 from pathlib import Path
 from datetime import datetime
@@ -6,9 +5,6 @@ from datetime import datetime
 # External packages and libraries
 import pandas
 from unidecode import unidecode
-
-
-FILENAME_PREFIX = f"{datetime.strftime(datetime.now(), "%Y")}_NA_NRA_{'{filename}'}"
 
 
 VALUES_TO_REPLACE = {
@@ -190,24 +186,8 @@ def transform_election_date(series: pandas.Series):
     )
     
 
-def save_records(
-    records: dict[int, dict[str, str]],
-    filename: str,
-    filepath: Path,
-    *additional_info,
-):
 
-    filepath.mkdir(exist_ok=True)
-    timestamp = datetime.strftime(datetime.now(), "%Y-%m-%d-%H%M%S-%f")
-
-    df = pandas.DataFrame.from_dict(records, orient="index")
-    df.to_csv(filepath / (f"{filename}_{'-'.join(map(str, additional_info))}"
-                          f"{'-' if additional_info else ''}{timestamp}.csv"),
-              index=False
-    )
-
-
-def main(records_extracted: dict[int, dict[str, str]], export_directory: Path):
+def main(records_extracted: dict[int, dict[str, str]], **module_vars):
 
     df = pandas.DataFrame.from_dict(records_extracted, orient="index")
 
@@ -244,14 +224,7 @@ def main(records_extracted: dict[int, dict[str, str]], export_directory: Path):
     records_transformed = (
         df_transformed.astype(str).replace("nan", "").to_dict(orient="index")
     )
-
-    ## Export files
-    save_records(
-        records_extracted,
-        FILENAME_PREFIX.format(filename='Ratings-Transformed'),
-        export_directory / "TRANSFORMED_FILES",
-    )
-
+    
     return records_transformed
 
 
@@ -279,7 +252,7 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
-
+    
     dfs = []
 
     for file in args.extract_files:
@@ -288,4 +261,15 @@ if __name__ == "__main__":
     combined_dfs = pandas.concat(dfs, ignore_index=True)
     records_extracted = combined_dfs.to_dict(orient="index")
 
-    main(records_extracted, args.export_dir)
+    records_transformed = main(records_extracted)
+
+    timestamp = datetime.strftime(datetime.now(), "%Y-%m-%d-%H%M%S-%f")
+    filename_prefix = f"{datetime.strftime(datetime.now(), "%Y")}_NA_NRA_{'{filename}'}"
+
+    df_transformed = pandas.DataFrame.from_dict(records_transformed, orient="index")
+    df_transformed.to_csv(
+        args.export_dir / f"{filename_prefix.format(filename='Ratings-Transformed')}_{timestamp}.csv",
+        index=False
+    )
+    
+    
