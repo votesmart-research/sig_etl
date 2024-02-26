@@ -1,7 +1,6 @@
 
 from datetime import datetime
 from pathlib import Path
-import time
 
 import pandas
 from bs4 import BeautifulSoup

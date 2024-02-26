@@ -115,7 +115,7 @@ if __name__ == '__main__':
         html_files = filter(lambda f: f.name.endswith(
             '.html'), (args.exportdir / args.htmldir).iterdir())
         extracted = extract_files(
-            sorted(html_files, key=lambda x: x.stat().st_ctime))
+            sorted(html_files, key=lambda x: x.stat().st_mtime))
     else:
         extracted = main(args.exportdir)
 
