@@ -1,6 +1,7 @@
 from datetime import datetime
 from pathlib import Path
 
+
 import pandas
 from bs4 import BeautifulSoup
 from selenium import webdriver
@@ -14,26 +15,38 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.common.exceptions import NoSuchElementException
 
 
-URL = ""
+URL = "https://scorecard.lcv.org/members-of-congress"
 
 
 def extract(page_source, **additional_info):
 
     soup = BeautifulSoup(page_source, "html.parser")
+    table = soup.find("div", {"id": "moc-list-table"})
+    table_body = table.find("div", {"id": "moc-list-table-data"})
 
     def extract_table(table):
 
-        headers = [th.get_text(strip=True) for th in table.thead.find_all("th")]
-        rows = [tr.find_all("td") for tr in table.tbody.find_all("tr")]
+        headers = [
+            th.get_text(strip=True)
+            for th in table.find_all("span", {"class": "sortHeader"})
+        ]
+
+        rows = [
+            tr.find_all("span")
+            for tr in table_body.find_all("div", {"class": "tableRow"})
+        ]
 
         def get_text(x):
             return x.get_text(strip=True)
 
-        return [
-            dict(zip(headers, map(get_text, row))) | additional_info for row in rows
-        ]
+        for row in rows:
+            name = row[0]["sort"]
+            columns = list(map(get_text, row[1:]))
+            yield dict(zip(headers, [name] + columns)) | additional_info
 
-    return soup
+    extracted = list(extract_table(table))
+
+    return extracted
 
 
 def extract_files(files: list):
@@ -93,9 +106,47 @@ def main(export_path):
     # close overlay
     ActionChains(chrome_driver).send_keys(Keys.ESCAPE).perform()
 
+    extracted = []
+
+    extracted += extract(chrome_driver.page_source)
     save_html(chrome_driver.page_source, export_path)
 
-    extracted = extract(chrome_driver.page_source)
+
+    ## Currently the website show all the rows in one page, the below section
+    ## is commented for a purpose.
+
+    # chambers = chrome_driver.execute_script("""
+    #     return document.querySelectorAll('#button-bar-chamber-selector a')
+    # """)
+
+    # for chamber in chambers:
+    #     chamber.click()
+
+        # while True:
+
+        #     next_button, current_page = chrome_driver.execute_script(
+        #         """
+        #         p = document.querySelectorAll('#moc-list-table-footer a');
+        #         currentPage = document.querySelector('#moc-list-table-footer a.current').text
+        #         nextButton = p[p.length - 1];
+        #         lastAvailable = p[p.length - 2].text;
+        #         if (currentPage !== lastAvailable){
+        #             return [nextButton, currentPage]
+        #         }
+        #         else{
+        #             return [null, currentPage]
+        #         }
+        #         """
+        #     )
+
+        #     extracted += extract(chrome_driver.page_source, office=chamber.text)
+        #     save_html(chrome_driver.page_source, export_path, chamber.text, current_page)
+
+        #     if not next_button:
+        #         break
+        #     else:
+        #         next_button.click()
+
     records_extracted = dict(enumerate(extracted))
 
     return records_extracted
@@ -105,12 +156,6 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(prog="sig_webscrape")
-    parser.add_argument(
-        "-u",
-        "--url",
-        required=True,
-        help="Web URL of the ratings source",
-    )
     parser.add_argument(
         "-d",
         "--export_path",
@@ -125,8 +170,6 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
-
-    URL = args.url
 
     if args.html_dir:
         html_files = filter(

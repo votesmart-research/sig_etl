@@ -1,4 +1,3 @@
-
 from datetime import datetime
 from pathlib import Path
 
@@ -20,22 +19,24 @@ URL = "https://www.nea.org/advocating-for-change/action-center/nea-in-congress/r
 
 def extract(page_source, **additional_info):
 
-    soup = BeautifulSoup(page_source, 'html.parser')
+    soup = BeautifulSoup(page_source, "html.parser")
 
-    tables = soup.find_all('table', {'class': 'dataTable'})
+    tables = soup.find_all("table", {"class": "dataTable"})
 
     def extract_table(table):
 
-        headers = [th.get_text(strip=True)
-                   for th in table.thead.find_all('th')]
-        rows = [tr.find_all('td') for tr in table.tbody.find_all('tr')]
+        headers = [th.get_text(strip=True) for th in table.thead.find_all("th")]
+        rows = [tr.find_all("td") for tr in table.tbody.find_all("tr")]
 
-        def get_text(x): return x.get_text(strip=True)
+        def get_text(x):
+            return x.get_text(strip=True)
 
-        return [dict(zip(headers, map(get_text, row))) | additional_info for row in rows]
+        return [
+            dict(zip(headers, map(get_text, row))) | additional_info for row in rows
+        ]
 
     extracted = []
-    
+
     for table in tables:
         extracted += extract_table(table)
 
@@ -48,47 +49,51 @@ def extract_files(files: list):
 
     for file in files:
 
-        with open(file, 'r') as f:
+        with open(file, "r") as f:
             extracted += extract(f.read())
 
-    return extracted
+    records_extracted = dict(enumerate(extracted))
+
+    return records_extracted
 
 
 def save_html(page_source, filepath, *additional_info):
 
-    soup = BeautifulSoup(page_source, 'html.parser')
+    soup = BeautifulSoup(page_source, "html.parser")
 
-    filepath = Path(filepath) / 'HTML_FILES'
+    filepath = Path(filepath) / "HTML_FILES"
     filepath.mkdir(exist_ok=True)
 
-    timestamp = datetime.strftime(datetime.now(), '%Y-%m-%d-%H%M%S-%f')
+    timestamp = datetime.strftime(datetime.now(), "%Y-%m-%d-%H%M%S-%f")
 
-    with open(filepath / f"Ratings_{'-'.join(map(str, additional_info))}"
-                         f"{'-' if additional_info else ''}{timestamp}.html", 'w') as f:
+    with open(
+        filepath / f"Ratings_{'-'.join(map(str, additional_info))}"
+        f"{'-' if additional_info else ''}{timestamp}.html",
+        "w",
+    ) as f:
         f.write(str(soup))
 
 
-def save_extract(extracted: list[dict], filepath, *additional_info):
+def save_records(extracted: dict[int, dict[str, str]], filepath, filename):
 
-    filepath = Path(filepath) / 'EXTRACT_FILES'
     filepath.mkdir(exist_ok=True)
 
-    timestamp = datetime.strftime(datetime.now(), '%Y-%m-%d-%H%M%S-%f')
+    timestamp = datetime.strftime(datetime.now(), "%Y-%m-%d-%H%M%S-%f")
 
-    df = pandas.DataFrame.from_records(extracted)
+    df = pandas.DataFrame.from_dict(extracted, orient="index")
     df.to_csv(
-        filepath / f"Ratings-Extract_{'-'.join(map(str, additional_info))}"
-                   f"{'-' if additional_info else ''}{timestamp}.csv", index=False)
+        filepath / f"{filename}_{timestamp}.csv",
+        index=False,
+    )
 
 
 def main(export_dir):
 
     chrome_service = Service()
     chrome_options = Options()
-    chrome_options.add_argument('incognito')
-    chrome_options.add_argument('headless')
-    chrome_driver = webdriver.Chrome(
-        service=chrome_service, options=chrome_options)
+    chrome_options.add_argument("incognito")
+    chrome_options.add_argument("headless")
+    chrome_driver = webdriver.Chrome(service=chrome_service, options=chrome_options)
 
     chrome_driver.get(URL)
 
@@ -96,32 +101,45 @@ def main(export_dir):
     ActionChains(chrome_driver).send_keys(Keys.ESCAPE).perform()
 
     for el in chrome_driver.find_elements(By.XPATH, "//div[@class='table__content']"):
-        select = Select(el.find_element(By.CSS_SELECTOR, 'select'))
-        select.select_by_value('-1')
+        select = Select(el.find_element(By.CSS_SELECTOR, "select"))
+        select.select_by_value("-1")
 
-    extracted = extract(chrome_driver.page_source)
     save_html(chrome_driver.page_source, export_dir)
 
-    return extracted
+    extracted = extract(chrome_driver.page_source)
+    records_extracted = dict(enumerate(extracted))
+
+    return records_extracted
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(prog='sig_webscrape')
-    parser.add_argument('-d', '--exportdir', type=Path, required=True,
-                        help='file directory of where the files exports to')
-    parser.add_argument('-f', '--htmldir', type=Path,
-                        help='file directory of html files to read')
+    parser = argparse.ArgumentParser(prog="sig_webscrape")
+    parser.add_argument(
+        "-d",
+        "--export_path",
+        type=Path,
+        help="Filepath for files to export to.",
+    )
+    parser.add_argument(
+        "-f",
+        "--html_dir",
+        type=Path,
+        help="Directory of html files.",
+    )
 
     args = parser.parse_args()
 
-    if args.htmldir:
-        html_files = filter(lambda f: f.name.endswith(
-            '.html'), (args.exportdir / args.htmldir).iterdir())
-        extracted = extract_files(
-            sorted(html_files, key=lambda x: x.stat().st_ctime))
+    if args.html_dir:
+        html_files = filter(
+            lambda f: f.name.endswith(".html"),
+            (args.export_path / args.html_dir).iterdir(),
+        )
+        records_extracted = extract_files(
+            sorted(html_files, key=lambda x: x.stat().st_ctime)
+        )
     else:
-        extracted = main(args.exportdir)
+        records_extracted = main(args.export_path)
 
-    save_extract(extracted, args.exportdir)
+    save_records(records_extracted, args.export_path, "_NA_NEA_Ratings-Extract")
