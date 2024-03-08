@@ -1,6 +1,7 @@
 from datetime import datetime
 from pathlib import Path
 
+
 import pandas
 from bs4 import BeautifulSoup
 from selenium import webdriver
@@ -10,35 +11,40 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.support.ui import WebDriverWait, Select
+from selenium.webdriver.support.ui import WebDriverWait
 from selenium.common.exceptions import NoSuchElementException
 
 
-URL = "https://www.nea.org/advocating-for-change/action-center/nea-in-congress/report-card"
+URL = "https://scorecard.lcv.org/members-of-congress"
 
 
 def extract(page_source, **additional_info):
 
     soup = BeautifulSoup(page_source, "html.parser")
-
-    tables = soup.find_all("table", {"class": "dataTable"})
+    table = soup.find("div", {"id": "moc-list-table"})
+    table_body = table.find("div", {"id": "moc-list-table-data"})
 
     def extract_table(table):
 
-        headers = [th.get_text(strip=True) for th in table.thead.find_all("th")]
-        rows = [tr.find_all("td") for tr in table.tbody.find_all("tr")]
+        headers = [
+            th.get_text(strip=True)
+            for th in table.find_all("span", {"class": "sortHeader"})
+        ]
+
+        rows = [
+            tr.find_all("span")
+            for tr in table_body.find_all("div", {"class": "tableRow"})
+        ]
 
         def get_text(x):
             return x.get_text(strip=True)
 
-        return [
-            dict(zip(headers, map(get_text, row))) | additional_info for row in rows
-        ]
+        for row in rows:
+            name = row[0]["sort"]
+            columns = list(map(get_text, row[1:]))
+            yield dict(zip(headers, [name] + columns)) | additional_info
 
-    extracted = []
-
-    for table in tables:
-        extracted += extract_table(table)
+    extracted = list(extract_table(table))
 
     return extracted
 
@@ -87,7 +93,7 @@ def save_records(extracted: dict[int, dict[str, str]], filepath, filename):
     )
 
 
-def main(export_dir):
+def main(export_path):
 
     chrome_service = Service()
     chrome_options = Options()
@@ -100,13 +106,47 @@ def main(export_dir):
     # close overlay
     ActionChains(chrome_driver).send_keys(Keys.ESCAPE).perform()
 
-    for el in chrome_driver.find_elements(By.XPATH, "//div[@class='table__content']"):
-        select = Select(el.find_element(By.CSS_SELECTOR, "select"))
-        select.select_by_value("-1")
+    extracted = []
 
-    save_html(chrome_driver.page_source, export_dir)
+    extracted += extract(chrome_driver.page_source)
+    save_html(chrome_driver.page_source, export_path)
 
-    extracted = extract(chrome_driver.page_source)
+
+    ## Currently the website show all the rows in one page, the below section
+    ## is commented for a purpose.
+
+    # chambers = chrome_driver.execute_script("""
+    #     return document.querySelectorAll('#button-bar-chamber-selector a')
+    # """)
+
+    # for chamber in chambers:
+    #     chamber.click()
+
+        # while True:
+
+        #     next_button, current_page = chrome_driver.execute_script(
+        #         """
+        #         p = document.querySelectorAll('#moc-list-table-footer a');
+        #         currentPage = document.querySelector('#moc-list-table-footer a.current').text
+        #         nextButton = p[p.length - 1];
+        #         lastAvailable = p[p.length - 2].text;
+        #         if (currentPage !== lastAvailable){
+        #             return [nextButton, currentPage]
+        #         }
+        #         else{
+        #             return [null, currentPage]
+        #         }
+        #         """
+        #     )
+
+        #     extracted += extract(chrome_driver.page_source, office=chamber.text)
+        #     save_html(chrome_driver.page_source, export_path, chamber.text, current_page)
+
+        #     if not next_button:
+        #         break
+        #     else:
+        #         next_button.click()
+
     records_extracted = dict(enumerate(extracted))
 
     return records_extracted
@@ -142,4 +182,4 @@ if __name__ == "__main__":
     else:
         records_extracted = main(args.export_path)
 
-    save_records(records_extracted, args.export_path, "_NA_NEA_Ratings-Extract")
+    save_records(records_extracted, args.export_path, "Ratings-Extract")

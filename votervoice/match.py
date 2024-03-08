@@ -1,69 +1,38 @@
-import json
+import os
 from pathlib import Path
 
-import pandas
 import psycopg
 from rapidfuzz import fuzz
 from tqdm import tqdm
-
-if __name__ == "__main__":
-    import sys
-
-    sys.path.insert(0, str(Path(__file__).parent.parent))
+from dotenv import load_dotenv
 
 from tabular_matcher.matcher import TabularMatcher
 
 
-VSDB_REF = {
-    "offices": {
-        "U.S. House": 5,
-        "U.S. Senate": 6,
-        "State Assembly": 7,
-        "State House": 8,
-        "State Senate": 9,
-        "Delegate": 390,
-    }
-}
-
-
-def connect_to_database():
-    PACKAGE_DIR = Path(__file__).parent.parent
-    CONNECTION_INFO_FILEPATH = PACKAGE_DIR / "conn_info_psycopg.json"
-
-    with open(CONNECTION_INFO_FILEPATH, "r") as f:
-        connection_info = json.load(f)
-
-    return psycopg.connect(**connection_info)
-
-
 def load_query_string(query_filename: Path):
-    PACKAGE_DIR = Path(__file__).parent.parent
-    with open(PACKAGE_DIR / "queries" / f"{query_filename}.sql", "r") as f:
+    package_dir = Path(__file__).parent.parent
+    filepath = package_dir / "queries" / f"{query_filename}.sql"
+
+    with open(filepath, "r") as f:
         query_string = f.read()
 
     return query_string
 
 
-def query_from_database(query: str, connection, **params):
+def query_as_records(query: str, connection, **params):
     cursor = connection.cursor()
     cursor.execute(query, params)
+
     headers = [str(k[0]) for k in cursor.description]
     return {
         index: dict(zip(headers, row)) for index, row in enumerate(cursor.fetchall())
     }
 
 
-def office_name_to_id(connection):
-    pass
-
-
-def state_name_to_id(connection):
+def query_as_reference(query: str, connection, **params):
     cursor = connection.cursor()
-    cursor.execute(
-        """SELECT state.name, state_id 
-                      FROM state"""
-    )
-    return {state_name: state_id for state_name, state_id in cursor.fetchall()}
+    cursor.execute(query, params)
+    return {name: ids for ids, name in cursor.fetchall()}
 
 
 def match(records_transformed, records_query) -> dict[str, dict]:
@@ -119,51 +88,50 @@ def match(records_transformed, records_query) -> dict[str, dict]:
     return records_matched
 
 
-def save_matched_results(records_matched: dict[int, dict[str, str]], filepath):
-    filepath = Path(filepath) / "MATCHED_FILES"
-    filepath.mkdir(exist_ok=True)
+def main(records_transformed: dict[int, dict[str, str]], years):
+    
+    load_dotenv()
 
-    df = pandas.DataFrame.from_dict(records_matched, orient="index")
-    df.to_csv(filepath / "Ratings-Worksheet_matched.csv", index=False)
+    db_connection_info = {
+        "host": os.getenv("VSDB_HOST"),
+        "dbname": os.getenv("VSDB_DBNAME"),
+        "port": os.getenv("VSDB_PORT"),
+        "user": os.getenv("VSDB_USER"),
+        "password": os.getenv("VSDB_PASSWORD"),
+    }
 
-
-def save_query_results(records_query: dict[int, dict[str, str]], filepath):
-    filepath = Path(filepath) / "QUERY_FILES"
-    filepath.mkdir(exist_ok=True)
-
-    df = pandas.DataFrame.from_dict(records_query, orient="index")
-    df.to_csv(filepath / "query.csv", index=False)
-
-
-def main(records_transformed: dict[int, dict[str, str]], export_path: Path, *years):
     print("Connecting...")
-    conn = connect_to_database()
+    conn = psycopg.connect(**db_connection_info)
     print("Connected to database.")
 
     query_incumbents = load_query_string("office-candidates_by_congstatus")
+    query_offices = load_query_string("office_list")
+    office_list = query_as_reference(query_offices, conn)
 
-    offices = {VSDB_REF['offices'].get(r["office"]) for r in records_transformed.values()}
+    office_ids = {
+        office_list.get(r["office"])
+        for r in records_transformed.values()
+        if r["office"] in office_list
+    }
     state_ids = {r["state_id"] for r in records_transformed.values()}
 
-    records_query = query_from_database(
+    records_query = query_as_records(
         query_incumbents,
         conn,
         start_date=f"{min(years)}-01-03",
         end_date=f"{max(years)}-01-03",
-        office_ids=list(offices),
-        state_ids=list(state_ids) if state_ids else get_all_states(conn).values(),
+        office_ids=list(office_ids),
+        state_ids=list(state_ids),
         state_names=[],
     )
     records_matched = match(records_transformed, records_query)
-
-    save_matched_results(records_matched, export_path)
-    save_query_results(records_query, export_path)
 
     return records_matched, records_query
 
 
 if __name__ == "__main__":
     import argparse
+    import pandas
 
     parser = argparse.ArgumentParser(prog="VoterVoice Load")
 
@@ -178,7 +146,7 @@ if __name__ == "__main__":
 
     parser.add_argument(
         "-d",
-        "--exportdir",
+        "--export_path",
         type=Path,
         required=True,
         help="file directory of where the files exports to",
@@ -204,4 +172,12 @@ if __name__ == "__main__":
     combined_dfs = pandas.concat(dfs, ignore_index=True)
     records_transformed = combined_dfs.to_dict(orient="index")
 
-    main(records_transformed, args.exportdir, *args.years)
+    records_matched, records_query = main(
+        records_transformed, args.exportdir, *args.years
+    )
+
+    df_matched = pandas.DataFrame.from_dict(records_matched, orient="index")
+    df_query = pandas.DataFrame.from_dict(records_query, orient="index")
+
+    df_matched.to_csv(args.export_path / "Ratings-Matched.csv", index=False)
+    df_query.to_csv(args.export_path / "VSDB-Candidates.csv", index=False)

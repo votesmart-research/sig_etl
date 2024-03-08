@@ -1,64 +1,27 @@
-## Built-ins
-import json
+import os
 from pathlib import Path
 from datetime import datetime
 
-## External packages and libraries
+# External packages and libraries
 import pandas
 import psycopg
 from rapidfuzz import fuzz
 from tqdm import tqdm
 
-PACKAGE_DIR = Path(__file__).parent.parent
-
-if __name__ == "__main__":
-    import sys
-    sys.path.insert(0, PACKAGE_DIR)
-    sys.path.insert(1, PACKAGE_DIR.parent)
-    sys.path.insert(2, PACKAGE_DIR.parent.parent)
-    print(sys.path)
-    
 from tabular_matcher.matcher import TabularMatcher
-
-YEAR = datetime.strftime(datetime.now(), "%Y")
-TIMESTAMP = datetime.strftime(datetime.now(), "%Y-%m-%d-%H%M")
-FILENAME = (
-    f"{YEAR}_NA_NRA_Ratings{'{filetype}'}_{'{additional_info}'}{TIMESTAMP}.{'{ext}'}"
-)
-
-PACKAGE_DIR = Path(__file__).parent.parent
-
-def connect_to_database():
-    PACKAGE_DIR = Path(__file__).parent.parent
-    CONNECTION_INFO_FILEPATH = PACKAGE_DIR / "conn_info_psycopg.json"
-    
-    if not CONNECTION_INFO_FILEPATH.exists():
-        PACKAGE_DIR = PACKAGE_DIR.parent
-        CONNECTION_INFO_FILEPATH = PACKAGE_DIR / "conn_info_psycopg.json"
-        print(CONNECTION_INFO_FILEPATH)
-
-    with open(CONNECTION_INFO_FILEPATH, "r") as f:
-        connection_info = json.load(f)       
-
-    return psycopg.connect(**connection_info)
 
 
 def load_query_string(query_filename: Path):
-    PACKAGE_DIR = Path(__file__).parent.parent
-    
-    filepath = PACKAGE_DIR / "queries" / f"{query_filename}.sql"
-    
-    if not filepath.exists():
-        PACKAGE_DIR = PACKAGE_DIR.parent
-        filepath = PACKAGE_DIR / "queries" / f"{query_filename}.sql"
-    
+    package_dir = Path(__file__).parent.parent.parent
+    filepath = package_dir / "queries" / f"{query_filename}.sql"
+
     with open(filepath, "r") as f:
         query_string = f.read()
 
     return query_string
 
 
-def query_from_database(query: str, connection, **params):
+def query_as_records(query: str, connection, **params):
     cursor = connection.cursor()
     cursor.execute(query, params)
     headers = [str(k[0]) for k in cursor.description]
@@ -67,14 +30,10 @@ def query_from_database(query: str, connection, **params):
     }
 
 
-def get_all_offices(connection):
+def query_as_reference(query: str, connection, **params):
     cursor = connection.cursor()
-    cursor.execute(
-        """SELECT office_id, office.name
-                      FROM office
-                      ORDER BY rank ASC"""
-    )
-    return {office_name: office_id for office_id, office_name in cursor.fetchall()}
+    cursor.execute(query, params)
+    return {name: ids for ids, name in cursor.fetchall()}
 
 
 def match(records_transformed: pandas.DataFrame, records_query: pandas.DataFrame):
@@ -122,62 +81,47 @@ def match(records_transformed: pandas.DataFrame, records_query: pandas.DataFrame
     return records_matched
 
 
-def save_records(
-    records_queried: dict[int, dict[str, str]], filetype: str, filepath: Path
-):
-
-    filepath.mkdir(exist_ok=True)
-
-    filename = FILENAME.format(filetype=filetype, additional_info="", ext=".csv")
-
-    df = pandas.DataFrame.from_dict(records_queried, orient="index")
-    df.to_csv(filepath / filename, index=False)
-
-
-def quote_join(l):
-    return ", ".join(map(lambda x: f"'{x}'", l))
-
-
-def main(records_transformed: dict[int, dict[str, str]], export_directory: Path):
+def main(records_transformed: dict[int, dict[str, str]], **module_vars):
+    
+    assert module_vars.get('VSDB_CONNECTION_INFO') != None #Please provide connection info to VoteSmart's database
+    
     print("Connecting...")
-    conn = connect_to_database()
+    
+    conn = psycopg.connect(**module_vars.get("VSDB_CONNECTION_INFO"))
+    
     print("Connected to database.")
 
     query_election_candidates = load_query_string("election_candidates_by_electionyear")
+    query_office_list = load_query_string("office_list")
 
     election_years = {row["election_year"] for row in records_transformed.values()}
     state_names = {row["state_name"] for row in records_transformed.values()}
 
-    records_query = query_from_database(
+    records_election_candidates = query_as_records(
         query_election_candidates,
         conn,
         election_years=list(election_years),
-        office_ids=list(get_all_offices(conn).values()),
+        office_ids=list(query_as_reference(query_office_list, conn).values()),
         state_names=list(state_names),
         state_ids=[],
-        stages=['G', 'P']
+        stages=["G", "P"],
     )
 
-    records_matched = match(records_transformed, records_query)
+    records_matched = match(records_transformed, records_election_candidates)
 
-    ## Export files
-    save_records(records_query, "Query", filepath=export_directory / "QUERY_FILES")
-    save_records(
-        records_matched, "Matched", filepath=export_directory / "MATCHED_FILES"
-    )
-
-    return records_matched, records_query
+    return records_matched, records_election_candidates
 
 
 if __name__ == "__main__":
 
     import argparse
-
+    from dotenv import load_dotenv
+    
     parser = argparse.ArgumentParser(prog="VoterVoice Load")
 
     parser.add_argument(
         "-t",
-        "--transformedfiles",
+        "--transformed_files",
         type=Path,
         required=True,
         nargs="+",
@@ -186,16 +130,24 @@ if __name__ == "__main__":
 
     parser.add_argument(
         "-d",
-        "--exportdir",
+        "--export_dir",
         type=Path,
         required=True,
         help="file directory of where the files exports to",
     )
 
+    load_dotenv()
+
     args = parser.parse_args()
+    db_connection_info = {'host': os.getenv('VSDB_HOST'),
+                          'dbname': os.getenv('VSDB_DBNAME'),
+                          'port':os.getenv('VSDB_PORT'),
+                          'user':os.getenv('VSDB_USER'),
+                          'password':os.getenv('VSDB_PASSWORD'),
+                        }
 
     dfs = []
-    for file in args.transformedfiles:
+    for file in args.transformed_files:
         dfs.append(
             pandas.read_csv(file, na_values="nan", dtype=str, keep_default_na=False)
         )
@@ -203,4 +155,21 @@ if __name__ == "__main__":
     combined_dfs = pandas.concat(dfs, ignore_index=True)
     records_transformed = combined_dfs.to_dict(orient="index")
 
-    main(records_transformed, args.exportdir)
+    records_matched, records_election_candidates = main(records_transformed,
+                                                        VSDB_CONNECTION_INFO=db_connection_info)
+
+    timestamp = datetime.strftime(datetime.now(), "%Y-%m-%d-%H%M%S-%f")
+    filename_prefix = f"{datetime.strftime(datetime.now(), "%Y")}_NA_NRA_{'{filename}'}"
+
+    df_matched = pandas.DataFrame.from_dict(records_matched, orient="index")
+    df_matched.to_csv(
+        args.export_dir / f"{filename_prefix.format(filename='Ratings-Matched')}_{timestamp}.csv",
+        index=False
+    )
+    
+    df_election_candidates = pandas.DataFrame.from_dict(records_election_candidates, orient="index")
+    df_election_candidates.to_csv(
+        args.export_dir / f"{filename_prefix.format(filename='VSDB-Candidates')}_{timestamp}.csv",
+        index=False
+    )
+    

@@ -1,5 +1,11 @@
 bs4
 selenium
+psycopg
 pandas
 requests
+rapidfuzz
 tqdm
+unidecode
+python-dotenv
+
+git+ssh://git@github.com/jtai-dev/record_matcher.git#egg=record_matcher

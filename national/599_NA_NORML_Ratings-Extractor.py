@@ -1,4 +1,3 @@
-
 from datetime import datetime
 from pathlib import Path
 from itertools import chain
@@ -18,34 +17,33 @@ URL = "https://vote.norml.org/"
 
 
 def get_states(page_source):
-    soup = BeautifulSoup(page_source, 'html.parser')
-    state_links = chain(*(l.find_all('a')
-                        for l in soup.find_all(class_='state-list')))
-    
-    return {a.get_text(strip=True): urljoin(URL, a['href']) for a in state_links}
+    soup = BeautifulSoup(page_source, "html.parser")
+    state_links = chain(*(l.find_all("a") for l in soup.find_all(class_="state-list")))
+    return {a.get_text(strip=True): urljoin(URL, a["href"]) for a in state_links}
 
 
 def extract(page_source, **additional_info) -> list:
 
-    soup = BeautifulSoup(page_source, 'html.parser')
-    race_containers = soup.find_all(class_='race-container')
-    state = soup.find(class_='big-title').get_text(strip=True)
+    soup = BeautifulSoup(page_source, "html.parser")
+    race_containers = soup.find_all(class_="race-container")
+    state = soup.find(class_="big-title").get_text(strip=True)
     state_text = state.replace(" Guide", "")
 
     def extract_container(race_container):
-        office = race_container.find(class_='race-title')
-        endorsed_containers = race_container.find_all(
-            class_='endorsed-container')
+        office = race_container.find(class_="race-title")
+        endorsed_containers = race_container.find_all(class_="endorsed-container")
 
         for ec in endorsed_containers:
-            name = ec.find(class_='candidate-name')
-            score = ec.find(class_='candidate-score')
+            name = ec.find(class_="candidate-name")
+            score = ec.find(class_="candidate-score")
 
-            yield {'name': name.get_text(strip=True, separator=' '),
-                   'score': score.get_text(strip=True, separator=' '),
-                   'office': office.get_text(strip=True, separator=' '), 
-                   'state': state_text, } | additional_info
-    
+            yield {
+                "name": name.get_text(strip=True, separator=" "),
+                "score": score.get_text(strip=True, separator=" "),
+                "office": office.get_text(strip=True, separator=" "),
+                "state": state_text,
+            } | additional_info
+
     extracted = []
     for rc in race_containers:
         extracted += list(extract_container(rc))
@@ -59,48 +57,58 @@ def extract_files(files: list):
 
     for file in files:
 
-        with open(file, 'r') as f:
+        with open(file, "r") as f:
             extracted += extract(f.read())
 
-    return {'candidates': list(filter(lambda record: record['office'].startswith("Race for"), extracted)),
-            'incumbents': list(filter(lambda record: not record['office'].startswith("Race for"), extracted))}
+    return {
+        "candidates": list(
+            filter(lambda record: record["office"].startswith("Race for"), extracted)
+        ),
+        "incumbents": list(
+            filter(
+                lambda record: not record["office"].startswith("Race for"), extracted
+            )
+        ),
+    }
 
 
 def save_html(page_source, filepath, *additional_info):
 
-    soup = BeautifulSoup(page_source, 'html.parser')
+    soup = BeautifulSoup(page_source, "html.parser")
 
-    filepath = Path(filepath) / 'HTML_FILES'
+    filepath = Path(filepath) / "HTML_FILES"
     filepath.mkdir(exist_ok=True)
 
-    timestamp = datetime.strftime(datetime.now(), '%Y-%m-%d-%H%M%S-%f')
+    timestamp = datetime.strftime(datetime.now(), "%Y-%m-%d-%H%M%S-%f")
 
-    with open(filepath / f"Ratings_{'-'.join(map(str, additional_info))}"
-                         f"{'-' if additional_info else ''}{timestamp}.html", 'w') as f:
+    with open(
+        filepath / f"Ratings_{'-'.join(map(str, additional_info))}"
+        f"{'-' if additional_info else ''}{timestamp}.html",
+        "w",
+    ) as f:
         f.write(str(soup))
 
 
-def save_extract(extracted: list[dict], filepath, *additional_info):
+def save_records(extracted: dict[int, dict[str, str]], filepath, filename):
 
-    filepath = Path(filepath) / 'EXTRACT_FILES'
     filepath.mkdir(exist_ok=True)
 
-    timestamp = datetime.strftime(datetime.now(), '%Y-%m-%d-%H%M%S-%f')
+    timestamp = datetime.strftime(datetime.now(), "%Y-%m-%d-%H%M%S-%f")
 
-    df = pandas.DataFrame.from_records(extracted)
+    df = pandas.DataFrame.from_dict(extracted, orient="index")
     df.to_csv(
-        filepath / f"Ratings-Extract_{'-'.join(map(str, additional_info))}"
-                   f"{'-' if additional_info else ''}{timestamp}.csv", index=False)
+        filepath / f"{filename}_{timestamp}.csv",
+        index=False,
+    )
 
 
-def main() -> dict[list]:
+def main(export_path: Path):
 
     chrome_service = Service()
     chrome_options = Options()
-    chrome_options.add_argument('incognito')
-    chrome_options.add_argument('headless')
-    chrome_driver = webdriver.Chrome(
-        service=chrome_service, options=chrome_options)
+    chrome_options.add_argument("incognito")
+    chrome_options.add_argument("headless")
+    chrome_driver = webdriver.Chrome(service=chrome_service, options=chrome_options)
 
     chrome_driver.get(URL)
 
@@ -108,41 +116,75 @@ def main() -> dict[list]:
     ActionChains(chrome_driver).send_keys(Keys.ESCAPE).perform()
 
     states = get_states(chrome_driver.page_source)
-    p_bar = tqdm(total=len(states), desc='Extracting State')
+    p_bar = tqdm(total=len(states), desc="Extracting State")
 
     extracted = []
 
     for state, url in states.items():
         p_bar.desc = f"Extracting {state}"
-    
+
         chrome_driver.get(url)
         extracted += extract(chrome_driver.page_source)
-        save_html(chrome_driver.page_source, export_dir, state)
+        save_html(chrome_driver.page_source, export_path, state)
 
         p_bar.update(1)
 
-    return {'candidates': list(filter(lambda record: record['office'].startswith("Race for"), extracted)), 
-            'incumbents': list(filter(lambda record: not record['office'].startswith("Race for"), extracted))}
+    return {
+        "candidates": dict(
+            enumerate(
+                filter(
+                    lambda record: record["office"].startswith("Race for"),
+                    extracted,
+                )
+            )
+        ),
+        "incumbents": dict(
+            enumerate(
+                filter(
+                    lambda record: not record["office"].startswith("Race for"),
+                    extracted,
+                )
+            )
+        ),
+    }
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(prog='sig_webscrape')
-    parser.add_argument('-d','--exportdir', help='file directory of where the files exports to', required=True)
-    parser.add_argument('-f', '--htmldir', help='file directory of html files')
+    parser = argparse.ArgumentParser(prog="sig_webscrape")
+    parser.add_argument(
+        "-d",
+        "--export_path",
+        type=Path,
+        help="Filepath for files to export to.",
+        required=True,
+    )
+    parser.add_argument(
+        "-f",
+        "--html_dir",
+        type=Path,
+        help="Directory of html files.",
+    )
 
     args = parser.parse_args()
 
-    export_dir = Path(args.exportdir)
-    if args.htmldir:
-        html_dir = Path(args.htmldir)
-        html_files = filter(lambda f: f.name.endswith(
-            '.html'), (export_dir/html_dir).iterdir())
-        extracted = extract_files(
-            sorted(html_files, key=lambda x: x.stat().st_ctime))
+    if args.html_dir:
+        html_files = filter(
+            lambda f: f.name.endswith(".html"),
+            (args.export_path / args.html_dir).iterdir(),
+        )
+        extracted = extract_files(sorted(html_files, key=lambda x: x.stat().st_ctime))
     else:
-        extracted = main()
+        extracted = main(args.export_path)
 
-    save_extract(extracted['candidates'], export_dir, 'candidates')
-    save_extract(extracted['incumbents'], export_dir, 'incumbents')
+    save_records(
+        extracted["candidates"],
+        args.export_path,
+        "_NA_NORML_Ratings-Extract_candidates",
+    )
+    save_records(
+        extracted["incumbents"],
+        args.export_path,
+        "_NA_NORML_Ratings-Extract_incumbents",
+    )

@@ -53,12 +53,15 @@ def extract(page_source):
 
 
 def extract_files(files: list):
+    extract_by_session = defaultdict(list)
+    
     for file in files:
         with open(file, "r") as f:
-            file_contents = f.read()
+            page_source = f.read()
+            for session, records in extract(page_source):
+                extract_by_session[session] += records
 
-        for session, records in extract(driver=None, file=file_contents):
-            save_extract(records, session)
+    return extract_by_session
 
 
 def save_html(page_source, filepath, *additional_info):
@@ -95,7 +98,7 @@ def main(url, export_path: Path):
     chrome_service = Service()
     chrome_options = Options()
     chrome_options.add_argument("incognito")
-    # chrome_options.add_argument("headless")
+    chrome_options.add_argument("headless")
     chrome_driver = webdriver.Chrome(service=chrome_service, options=chrome_options)
 
     chrome_driver.get(url)
@@ -105,7 +108,7 @@ def main(url, export_path: Path):
             EC.visibility_of_all_elements_located(
                 (By.XPATH, '//table[@class="vvScorecardAggregate"]/tbody/tr')
             )
-        ) 
+        )
     except TimeoutException:
         chrome_driver.quit()
         return "Taking too long to load..."
@@ -115,20 +118,19 @@ def main(url, export_path: Path):
         '//section[@id="vvConsolidatedScorecardResults"]//div[@class="vv-tab-menu-item-container"]',
     )
 
-    extracted_by_session = defaultdict(list)
+    extract_by_session = defaultdict(list)
     p_bar = tqdm(total=len(offices))
 
     for office in offices:
         p_bar.desc = f"Extracting {office.text}"
         office.click()
         for session, records in extract(chrome_driver.page_source):
-            extracted_by_session[session] += records
-            save_extract(records, export_path, office.text, session)
+            extract_by_session[session] += records
 
         save_html(chrome_driver.page_source, export_path, office.text)
         p_bar.update(1)
-        
-    return extracted_by_session
+
+    return extract_by_session
 
 
 if __name__ == "__main__":
@@ -144,13 +146,16 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "-d",
-        "--exportdir",
+        "--export_path",
         type=Path,
         required=True,
         help="file directory of where the files exports to",
     )
     parser.add_argument(
-        "-f", "--htmldir", type=Path, help="file directory of html files to read"
+        "-f",
+        "--htmldir",
+        type=Path,
+        help="file directory of html files to read",
     )
 
     args = parser.parse_args()
@@ -160,6 +165,11 @@ if __name__ == "__main__":
             lambda f: f.name.endswith(".html"),
             (args.exportdir / args.htmldir).iterdir(),
         )
-        extract_files(sorted(html_files, key=lambda x: x.stat().st_ctime))
+        extract_by_session = extract_files(sorted(html_files, key=lambda x: x.stat().st_ctime))
     else:
-        main(args.url, args.exportdir)
+        extract_by_session = main(args.url, args.exportdir)
+        
+    for session, extracted in extract_by_session.items():
+        if session:
+            df_records = pandas.DataFrame.from_dict(dict(enumerate(extracted)), orient="dict")
+            df_records.to_csv(args.export_path / f'{session}_Ratings-Extract.csv', index=False)

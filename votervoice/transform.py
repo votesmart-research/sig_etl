@@ -56,23 +56,15 @@ def get_name(series: pandas.Series):
 def get_party_state_district(series: pandas.Series):
     pat_inside_parent = r"\((?P<party>\w+)-(?P<state_id>\w+)-?(?P<district>\w+)?\)"
     delegates = series.str.contains("^Delegate", regex=True)
-    
+
     df_party_state_district = series.str.extract(pat_inside_parent)
-    df_party_state_district["district"].replace(r"^0+", "", inplace=True, regex=True)
-    
+    df_party_state_district["district"] = df_party_state_district['district'].replace(r"^0+", "", regex=True)
+
     df_party_state_district.loc[delegates, "district"] = "Delegate"
     return df_party_state_district
 
 
-def save_transformed(records_transformed: dict[int, dict[str, str]], filepath):
-    filepath = Path(filepath) / "TRANSFORMED_FILES"
-    filepath.mkdir(exist_ok=True)
-
-    df = pandas.DataFrame.from_dict(records_transformed, orient="index")
-    df.to_csv(filepath / "Ratings-Worksheet_transformed.csv", index=False)
-
-
-def main(records_extracted, export_path: Path):
+def main(records_extracted):
     df = pandas.DataFrame.from_dict(records_extracted, orient="index")
 
     df_name = get_name(df["info"])
@@ -88,12 +80,11 @@ def main(records_extracted, export_path: Path):
         ],
         axis=1,
     )
-    
+
     df_transformed.replace(VALUES_TO_REPLACE, inplace=True)
-    df_transformed.replace(numpy.NaN, '', inplace=True)
-    
+    df_transformed.replace(numpy.NaN, "", inplace=True)
+
     records_transformed = df_transformed.to_dict(orient="index")
-    save_transformed(records_transformed, export_path)
 
     return records_transformed
 
@@ -130,4 +121,7 @@ if __name__ == "__main__":
     combined_dfs = pandas.concat(dfs, ignore_index=True)
     records_extracted = combined_dfs.to_dict(orient="index")
 
-    main(records_extracted, args.exportdir)
+    records_transformed = main(records_extracted, args.exportdir)
+    df_transformed = pandas.DataFrame.from_dict(records_transformed, orient='index')
+    
+    df_transformed.to_csv(args.export_path / 'Ratings-Transformed.csv', index=False)
