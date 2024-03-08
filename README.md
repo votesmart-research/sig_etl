@@ -1,2 +1,3 @@
-# Special Interest Groups (SIGs) ETL
-Python scripts to scrape Special Interest Groups (SIGS) websites
+# Special Interest Groups (SIGs) ETL pipeline
+
+An ETL pipeline for political interest groups tracked by VoteSmart.
