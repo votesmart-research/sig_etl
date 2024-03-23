@@ -58,7 +58,9 @@ def get_party_state_district(series: pandas.Series):
     delegates = series.str.contains("^Delegate", regex=True)
 
     df_party_state_district = series.str.extract(pat_inside_parent)
-    df_party_state_district["district"] = df_party_state_district['district'].replace(r"^0+", "", regex=True)
+    df_party_state_district["district"] = df_party_state_district["district"].replace(
+        r"^0+", "", regex=True
+    )
 
     df_party_state_district.loc[delegates, "district"] = "Delegate"
     return df_party_state_district
@@ -87,41 +89,3 @@ def main(records_extracted):
     records_transformed = df_transformed.to_dict(orient="index")
 
     return records_transformed
-
-
-if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(prog="VoterVoice Transform")
-
-    parser.add_argument(
-        "-e",
-        "--extractfiles",
-        type=Path,
-        required=True,
-        nargs="+",
-        help="File containing the scrape extract from votervoice",
-    )
-
-    parser.add_argument(
-        "-d",
-        "--exportdir",
-        type=Path,
-        required=True,
-        help="File directory of where transformed files exports to",
-    )
-
-    args = parser.parse_args()
-
-    dfs = []
-
-    for file in args.extractfiles:
-        dfs.append(pandas.read_csv(file))
-
-    combined_dfs = pandas.concat(dfs, ignore_index=True)
-    records_extracted = combined_dfs.to_dict(orient="index")
-
-    records_transformed = main(records_extracted, args.exportdir)
-    df_transformed = pandas.DataFrame.from_dict(records_transformed, orient='index')
-    
-    df_transformed.to_csv(args.export_path / 'Ratings-Transformed.csv', index=False)

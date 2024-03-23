@@ -6,7 +6,7 @@ from rapidfuzz import fuzz
 from tqdm import tqdm
 from dotenv import load_dotenv
 
-from tabular_matcher.matcher import TabularMatcher
+from record_matcher.matcher import RecordMatcher
 
 
 def load_query_string(query_filename: Path):
@@ -36,17 +36,17 @@ def query_as_reference(query: str, connection, **params):
 
 
 def match(records_transformed, records_query) -> dict[str, dict]:
-    tb_matcher = TabularMatcher()
+    rc_matcher = RecordMatcher()
 
-    tb_matcher.x_records = records_transformed
-    tb_matcher.y_records = records_query
+    rc_matcher.x_records = records_transformed
+    rc_matcher.y_records = records_query
 
-    tb_matcher.required_threshold = 75
-    tb_matcher.duplicate_threshold = 3
+    rc_matcher.required_threshold = 75
+    rc_matcher.duplicate_threshold = 3
 
-    tb_config = tb_matcher.config
+    rm_config = rc_matcher.config
 
-    tb_config.scorers_by_column.SCORERS.update(
+    rm_config.scorers_by_column.SCORERS.update(
         {
             "WRatio": lambda x, y: fuzz.WRatio(x, y),
             "PTRatio": lambda x, y: fuzz.partial_token_ratio(
@@ -55,31 +55,31 @@ def match(records_transformed, records_query) -> dict[str, dict]:
         }
     )
 
-    tb_config.scorers_by_column.default = "WRatio"
-    tb_config.thresholds_by_column.default = 75
+    rm_config.scorers_by_column.default = "WRatio"
+    rm_config.thresholds_by_column.default = 75
 
-    tb_config.populate()
+    rm_config.populate()
 
-    tb_config.columns_to_get["candidate_id"] = "candidate_id"
-    del tb_config.columns_to_match["state_id"]
+    rm_config.columns_to_get["candidate_id"] = "candidate_id"
+    del rm_config.columns_to_match["state_id"]
 
-    tb_config.columns_to_match["firstname"] = "middlename", "nickname"
-    tb_config.columns_to_group["state_id"] = "state_id"
+    rm_config.columns_to_match["firstname"] = "middlename", "nickname"
+    rm_config.columns_to_group["state_id"] = "state_id"
 
-    tb_config.thresholds_by_column["firstname"] = 85
-    tb_config.thresholds_by_column["middlename"] = 90
-    tb_config.thresholds_by_column["lastname"] = 88
-    tb_config.thresholds_by_column["suffix"] = 98
-    tb_config.thresholds_by_column["office"] = 100
-    tb_config.thresholds_by_column["district"] = 95
-    tb_config.thresholds_by_column["party"] = 100
+    rm_config.thresholds_by_column["firstname"] = 85
+    rm_config.thresholds_by_column["middlename"] = 90
+    rm_config.thresholds_by_column["lastname"] = 88
+    rm_config.thresholds_by_column["suffix"] = 98
+    rm_config.thresholds_by_column["office"] = 100
+    rm_config.thresholds_by_column["district"] = 95
+    rm_config.thresholds_by_column["party"] = 100
 
-    tb_config.scorers_by_column["middlename"] = "PTRatio"
+    rm_config.scorers_by_column["middlename"] = "PTRatio"
 
     p_bar = tqdm(total=len(records_transformed))
 
-    records_matched, match_info = tb_matcher.match(update_func=lambda: p_bar.update(1))
-    records_matched, match_info = tb_matcher.match()
+    records_matched, match_info = rc_matcher.match(update_func=lambda: p_bar.update(1))
+    records_matched, match_info = rc_matcher.match()
 
     max_key_length = max(match_info, key=lambda x: len(x)) if match_info else 0
     for k, v in match_info.items():
@@ -89,7 +89,7 @@ def match(records_transformed, records_query) -> dict[str, dict]:
 
 
 def main(records_transformed: dict[int, dict[str, str]], years):
-    
+
     load_dotenv()
 
     db_connection_info = {
@@ -127,57 +127,3 @@ def main(records_transformed: dict[int, dict[str, str]], years):
     records_matched = match(records_transformed, records_query)
 
     return records_matched, records_query
-
-
-if __name__ == "__main__":
-    import argparse
-    import pandas
-
-    parser = argparse.ArgumentParser(prog="VoterVoice Load")
-
-    parser.add_argument(
-        "-t",
-        "--transformedfiles",
-        type=Path,
-        required=True,
-        nargs="+",
-        help="File containing the scrape extract from votervoice",
-    )
-
-    parser.add_argument(
-        "-d",
-        "--export_path",
-        type=Path,
-        required=True,
-        help="file directory of where the files exports to",
-    )
-
-    parser.add_argument(
-        "-y",
-        "--years",
-        type=int,
-        nargs="+",
-        required=True,
-        help="Year(s) of the ratings",
-    )
-
-    args = parser.parse_args()
-
-    dfs = []
-    for file in args.transformedfiles:
-        dfs.append(
-            pandas.read_csv(file, na_values="nan", dtype=str, keep_default_na=False)
-        )
-
-    combined_dfs = pandas.concat(dfs, ignore_index=True)
-    records_transformed = combined_dfs.to_dict(orient="index")
-
-    records_matched, records_query = main(
-        records_transformed, args.exportdir, *args.years
-    )
-
-    df_matched = pandas.DataFrame.from_dict(records_matched, orient="index")
-    df_query = pandas.DataFrame.from_dict(records_query, orient="index")
-
-    df_matched.to_csv(args.export_path / "Ratings-Matched.csv", index=False)
-    df_query.to_csv(args.export_path / "VSDB-Candidates.csv", index=False)

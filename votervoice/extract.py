@@ -54,7 +54,7 @@ def extract(page_source):
 
 def extract_files(files: list):
     extract_by_session = defaultdict(list)
-    
+
     for file in files:
         with open(file, "r") as f:
             page_source = f.read()
@@ -131,45 +131,3 @@ def main(url, export_path: Path):
         p_bar.update(1)
 
     return extract_by_session
-
-
-if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(prog="Votervoice Webscrape")
-    parser.add_argument(
-        "-u",
-        "--url",
-        type=str,
-        required=True,
-        help="website url where the ratings are located",
-    )
-    parser.add_argument(
-        "-d",
-        "--export_path",
-        type=Path,
-        required=True,
-        help="file directory of where the files exports to",
-    )
-    parser.add_argument(
-        "-f",
-        "--htmldir",
-        type=Path,
-        help="file directory of html files to read",
-    )
-
-    args = parser.parse_args()
-
-    if args.htmldir:
-        html_files = filter(
-            lambda f: f.name.endswith(".html"),
-            (args.exportdir / args.htmldir).iterdir(),
-        )
-        extract_by_session = extract_files(sorted(html_files, key=lambda x: x.stat().st_ctime))
-    else:
-        extract_by_session = main(args.url, args.exportdir)
-        
-    for session, extracted in extract_by_session.items():
-        if session:
-            df_records = pandas.DataFrame.from_dict(dict(enumerate(extracted)), orient="dict")
-            df_records.to_csv(args.export_path / f'{session}_Ratings-Extract.csv', index=False)
