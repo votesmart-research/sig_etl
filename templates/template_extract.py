@@ -19,6 +19,7 @@ URL = ""
 def extract(page_source, **additional_info):
 
     soup = BeautifulSoup(page_source, "html.parser")
+    table = soup.find("table")
 
     def extract_table(table):
 
@@ -32,10 +33,10 @@ def extract(page_source, **additional_info):
             dict(zip(headers, map(get_text, row))) | additional_info for row in rows
         ]
 
-    return soup
+    return extract_table(table)
 
 
-def extract_files(files: list):
+def extract_files(files: list[Path]):
 
     extracted = []
 
@@ -74,15 +75,15 @@ def save_html(
 
 def main(filename: str, export_path: Path, html_path: Path = None):
 
-    if html_path:
-        html_files = filter(
-            lambda f: f.name.endswith(".html"),
-            (export_path / html_path).iterdir(),
-        )
-        records_extracted = extract_files(
-            sorted(html_files, key=lambda x: x.stat().st_ctime)
-        )
-        return records_extracted
+    # if html_path:
+    #     html_files = filter(
+    #         lambda f: f.name.endswith(".html"),
+    #         (export_path / html_path).iterdir(),
+    #     )
+    #     records_extracted = extract_files(
+    #         sorted(html_files, key=lambda x: x.stat().st_ctime)
+    #     )
+    #     return records_extracted
 
     chrome_service = Service()
     chrome_options = Options()

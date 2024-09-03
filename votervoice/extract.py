@@ -22,7 +22,9 @@ RATINGS_METHODOLOGY = {
     "Voted with us": "+",
     "Voted against us": "-",
     "No position": "*",
-    None: "",
+    "vvSupportContainer":"+",
+    "vvOpposeContainer": "-",
+    "vvNeutralContainer": "*",
 }
 
 
@@ -32,13 +34,28 @@ def extract(page_source):
     office = soup.find("div", {"class": "vv-tab-menu-item-active"}).get_text(strip=True)
     sessions = soup.find_all("section", {"class": "vv-scorecard-section"})
 
+    def translate_ratings(rating_columns):
+        rating_string = ""
+        for td in rating_columns:
+            title = td.span.get("title") if td.span else None
+            class_ = td.span.get("class") if td.span else None
+
+            if (title is None or title not in RATINGS_METHODOLOGY):
+                for m in RATINGS_METHODOLOGY:
+                    if class_ and m in class_:
+                        rating_string += RATINGS_METHODOLOGY.get(m)
+                        break
+            elif title in RATINGS_METHODOLOGY:
+                rating_string += RATINGS_METHODOLOGY.get(title)
+        return rating_string
+
     def _extract_row(row):
         columns = row.find_all("td")
-        rating_string = [td.span["title"] if td.span else None for td in columns[2:]]
-        translated_rating_string = "".join(
-            [RATINGS_METHODOLOGY.get(c) for c in rating_string]
-        )
-
+        # rating_string = [td.span["title"] if td.span else None for td in columns[2:]]
+        # translated_rating_string = "".join(
+        #     [RATINGS_METHODOLOGY.get(c) for c in rating_string if RATINGS_METHODOLOGY.get(c)]
+        # )
+        translated_rating_string = translate_ratings(columns[2:])
         return {
             "info": columns[0]["title"],
             "sig_rating": columns[1].get_text(strip=True),

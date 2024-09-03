@@ -4,7 +4,6 @@ from pathlib import Path
 from datetime import datetime
 
 # External packages and libraries
-import pandas
 from tqdm import tqdm
 from bs4 import BeautifulSoup
 from selenium import webdriver

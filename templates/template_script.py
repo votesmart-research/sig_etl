@@ -7,19 +7,19 @@ import pandas
 from dotenv import load_dotenv
 
 
-def extract():
+def extract(*foo):
     """Module that extracts"""
-    pass
+    return {}
 
 
-def transform():
+def transform(*foo):
     """Module that transform"""
-    pass
+    return {}
 
 
-def match():
+def match(*foo):
     """Module that matches"""
-    pass
+    return {}
 
 
 FILENAME = f"_NA_"
@@ -63,6 +63,13 @@ def main():
         "--file",
         type=Path,
         help="read extracted or transformed file",
+    )
+
+    parser.add_argument(
+        "-y",
+        "--year",
+        type=str,
+        help="Year(s) of the ratings",
     )
 
     parser.add_argument(
@@ -116,32 +123,34 @@ def main():
             args.export_path / "EXTRACT_FILES",
         )
 
-        records_transformed = transform(records_extracted)
-        save_records(
-            records_transformed,
-            FILENAME + "Ratings-Transformed",
-            args.export_path / "TRANSFORMED_FILES",
-        )
+        # records_transformed = transform(records_extracted)
+        # save_records(
+        #     records_transformed,
+        #     FILENAME + "Ratings-Transformed",
+        #     args.export_path / "TRANSFORMED_FILES",
+        # )
 
-        records_matched, records_election_candidates = match(
-            records_transformed, vsdb_conn_info
-        )
+        # records_matched, records_election_candidates = match(
+        #     records_transformed, vsdb_conn_info
+        # )
 
-        save_records(
-            records_matched,
-            FILENAME + "Ratings-Matched",
-            args.export_path / "MATCHED_FILES",
-        )
+        # save_records(
+        #     records_matched,
+        #     FILENAME + "Ratings-Matched",
+        #     args.export_path / "MATCHED_FILES",
+        # )
 
-        save_records(
-            records_election_candidates,
-            FILENAME + "VSDB-Candidates",
-            args.export_path / "QUERY_FILES",
-        )
+        # save_records(
+        #     records_election_candidates,
+        #     FILENAME + "VSDB-Candidates",
+        #     args.export_path / "QUERY_FILES",
+        # )
 
     elif args.extract and not (any((args.transform, args.match))):
 
-        records_extracted = extract(FILENAME + "Ratings", args.export_path)
+        records_extracted = extract(
+            FILENAME + "Ratings", args.export_path, args.html_path
+        )
         save_records(
             records_extracted,
             FILENAME + "Ratings-Extract",

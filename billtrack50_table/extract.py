@@ -1,5 +1,5 @@
-import sys
-import pandas
+from datetime import datetime
+from pathlib import Path
 
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -7,8 +7,6 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.action_chains import ActionChains
 from bs4 import BeautifulSoup
-from datetime import datetime
-from pathlib import Path
 
 
 def extract(page_source, **additional_info):

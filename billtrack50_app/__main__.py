@@ -77,6 +77,13 @@ def main():
     )
 
     parser.add_argument(
+        "-chp",
+        "--candidate_html_path",
+        type=Path,
+        help="filepath to candidates HTML directory",
+    )
+
+    parser.add_argument(
         "-e",
         "--extract",
         action="store_true",
@@ -97,6 +104,13 @@ def main():
         help="to match only",
     )
 
+    parser.add_argument(
+        "-vi",
+        "--vote_index",
+        action="store_true",
+        help="When scores are negative, extract vote Index",
+    )
+
     args = parser.parse_args()
 
     load_dotenv()
@@ -110,13 +124,15 @@ def main():
     }
 
     if not any((args.extract, args.transform, args.match)):
-
         records_extracted = extract(
             args.url,
             FILENAME + "Ratings",
             args.export_path,
             args.html_path,
+            args.candidate_html_path,
+            args.vote_index,
         )
+
         save_records(
             records_extracted,
             FILENAME + "Ratings-Extract",
@@ -148,7 +164,10 @@ def main():
 
     elif args.extract and not (any((args.transform, args.match))):
 
-        records_extracted = extract(FILENAME + "Ratings", args.export_path)
+        records_extracted = extract(
+            FILENAME + "Ratings", args.export_path, args.html_path, args.vote_index
+        )
+
         save_records(
             records_extracted,
             FILENAME + "Ratings-Extract",

@@ -34,7 +34,7 @@ def extract_candidate(page_source, **additional_info):
 
     return (
         {
-            "sig_candidate_id": container["data-legislatorid"],
+            # "sig_candidate_id": container["data-legislatorid"],
             "info": info.text.strip() if info else None,
         }
         | dict(zip(score_headers, scores))
@@ -42,7 +42,47 @@ def extract_candidate(page_source, **additional_info):
     )
 
 
+def get_vote_index(page_source):
+    soup = BeautifulSoup(page_source, "html.parser")
+    table = soup.select_one(".bill-table .pure-table")
+
+    if not table:
+        return {}
+
+    headers = [th.text for th in table.thead.find_all("th")]
+    rows = [tr.find_all("td") for tr in table.tbody.find_all("tr")]
+
+    extracted_table = [
+        dict(zip(headers, map(lambda x: x.get_text(strip=True), row))) for row in rows
+    ]
+
+    possible_score = 0
+
+    for r in extracted_table:
+        possible_score += abs(float(r.get("Score"))) if r.get("Score") else 0
+
+    container = soup.find("div", {"class": "bt50-scorecard-container"})
+    score_containers = container.find_all("p", {"class": "legislator-detail-score"})
+    score_headers = [p.strong.text.strip() for p in score_containers]
+    scores = [p.span.text.strip() for p in score_containers]
+
+    vote_indices = {}
+
+    def calculate_vote_index(total_score, possible_score):
+        return ((total_score + possible_score) / (2 * possible_score)) * 100
+
+    for score_header, score in zip(score_headers, scores):
+
+        vote_indices["possible_score"] = possible_score
+        vote_indices[f"vote_index_{score_header}"] = calculate_vote_index(
+            float(score), possible_score
+        )
+
+    return vote_indices
+
+
 def extract_cards(page_source, **additional_info) -> Generator[str, tuple[str, dict]]:
+
     soup = BeautifulSoup(page_source, "html.parser")
     container = soup.find("div", {"id": "legislators-container"})
 
@@ -50,31 +90,45 @@ def extract_cards(page_source, **additional_info) -> Generator[str, tuple[str, d
         url = card.find("a")["href"]
         id_segment_match = re.search(r"/+([^\W_]\w*)\W*$", url)
         sig_candidate_id = id_segment_match.group(1) if id_segment_match else ""
-        party = card.find("div", {"class": "party"})
+        party = card.select_one(".party .value")
         name = card.find("div", {"class": "name"})
+        info = card.find("div", {"class": "info"})
 
         yield url, {
             "sig_candidate_id": sig_candidate_id,
-            "name": name.text.strip() if name else None,
-            "party": party.find("div", {"class": "value"}).text if party else None,
+            "name": name.get_text(strip=True, separator=", ") if name else None,
+            "party": party.get_text(strip=True, separator=", ") if party else None,
+            "card_info": info.get_text(strip=True, separator=", ") if info else None,
         } | additional_info
 
 
-def extract_files(files: list):
+def extract_files(files: list[Path], candidate_files: list[Path], vote_index=False):
 
-    with open(files[0], "r") as f:
-        card_records = {
-            record["sig_candidate_id"]: record for _, record in extract_cards(f)
-        }
+    card_records = {}
 
-    records_extracted = []
-
-    for file in tqdm(files[1:]):
+    for file in files:
         with open(file, "r") as f:
+            card_records.update(
+                {record["sig_candidate_id"]: record for _, record in extract_cards(f)}
+            )
+
+    extracted = []
+
+    for c_file in tqdm(candidate_files[1:]):
+        sig_candidate_id = "".join(c_file.name.split("_")[-1].split("-")[:-5])
+
+        with open(c_file, "r") as f:
             page_source = f.read()
+            card_record = card_records.get(sig_candidate_id)
             candidate_extract = extract_candidate(page_source)
-            card_record = card_records.get(candidate_extract["sig_candidate_id"])
-            records_extracted.append(card_record | candidate_extract)
+
+            if vote_index:
+                vi = get_vote_index(page_source)
+                extracted.append(card_record | candidate_extract | vi)
+            else:
+                extracted.append(card_record | candidate_extract)
+
+    records_extracted = dict(enumerate(extracted))
 
     return records_extracted
 
@@ -102,15 +156,28 @@ def save_html(
         f.write(str(soup))
 
 
-def main(url, filename: str, export_path: Path, html_path:Path = None):
+def main(
+    url,
+    filename: str,
+    export_path: Path,
+    html_path: Path = None,
+    candidates_html_path: Path = None,
+    vote_index: bool = False,
+):
 
     if html_path:
         html_files = filter(
             lambda f: f.name.endswith(".html"),
             (export_path / html_path).iterdir(),
         )
+        candidates_html_files = filter(
+            lambda f: f.name.endswith(".html"),
+            (export_path / candidates_html_path).iterdir(),
+        )
         records_extracted = extract_files(
-            sorted(html_files, key=lambda x: x.stat().st_ctime)
+            sorted(html_files, key=lambda x: x.stat().st_ctime),
+            sorted(candidates_html_files, key=lambda x: x.stat().st_ctime),
+            vote_index,
         )
         return records_extracted
 
@@ -134,6 +201,7 @@ def main(url, filename: str, export_path: Path, html_path:Path = None):
                 )
             )
         )
+
     except TimeoutException:
         print("Cannot find Legislator Container. Quitting...")
         chrome_driver.quit()
@@ -154,6 +222,7 @@ def main(url, filename: str, export_path: Path, html_path:Path = None):
     extracted = []
 
     card_records = list(extract_cards(chrome_driver.page_source))
+
     save_html(
         chrome_driver.page_source,
         export_path / "HTML_FILES",
@@ -161,19 +230,38 @@ def main(url, filename: str, export_path: Path, html_path:Path = None):
     )
 
     for candidate_url, card_record in tqdm(card_records):
-        chrome_driver.get(urljoin(chrome_driver.current_url, candidate_url))
-        _extracted = extract_candidate(chrome_driver.page_source)
 
-        chrome_driver.execute_script("window.history.go(-1)")
+        chrome_driver.get(urljoin(chrome_driver.current_url, candidate_url))
+
+        if vote_index:
+            try:
+                WebDriverWait(chrome_driver, 10).until(
+                    EC.visibility_of_element_located(
+                        (
+                            By.CSS_SELECTOR,
+                            ".bill-table tbody",
+                        )
+                    )
+                )
+            except TimeoutException:
+                pass
 
         save_html(
             chrome_driver.page_source,
-            export_path / "HTML_FILES",
+            export_path / "HTML_FILES_CANDIDATE",
             filename,
-            _extracted["sig_candidate_id"],
+            card_record["sig_candidate_id"],
         )
 
-        extracted.append(_extracted | card_record)
+        _extracted = extract_candidate(chrome_driver.page_source)
+
+        if vote_index:
+            vi = get_vote_index(chrome_driver.page_source)
+            extracted.append(_extracted | card_record | vi)
+        else:
+            extracted.append(_extracted | card_record)
+
+        chrome_driver.execute_script("window.history.go(-1)")
 
     records_extracted = dict(enumerate(extracted))
     return records_extracted

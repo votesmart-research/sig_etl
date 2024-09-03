@@ -113,7 +113,7 @@ def main(filename: str, export_path: Path, html_path: Path = None):
     chrome_service = Service()
     chrome_options = Options()
     chrome_options.add_argument("incognito")
-    chrome_options.add_argument("headless")
+    # chrome_options.add_argument("headless")
     chrome_driver = webdriver.Chrome(service=chrome_service, options=chrome_options)
 
     chrome_driver.get(URL)
