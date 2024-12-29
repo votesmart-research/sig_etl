@@ -22,7 +22,7 @@ def extract(page_source, **additional_info):
     name_grade = soup.select_one(".ms-scorer-block")
     party_state = soup.select_one(".ms-scorer-party-info")
 
-    name = name_grade.h1
+    name = name_grade.find("h1") if name_grade else None
     grade = name_grade.select_one(".ms-rating")
     scores = soup.select("span.ms-symbol-score")
 
@@ -42,9 +42,9 @@ def extract(page_source, **additional_info):
         return round(positives / (positives + negatives) * 100)
 
     return {
-        "name": name.get_text(strip=True),
-        "grade": grade.get_text(strip=True),
-        "party_state": party_state.get_text(strip=True),
+        "name": name.get_text(strip=True) if name else None,
+        "grade": grade.get_text(strip=True) if grade else None,
+        "party_state": party_state.get_text(strip=True) if party_state else None,
         "sig_rating": "".join(sig_rating),
         "our_rating": translate(sig_rating),
     } | additional_info
@@ -132,7 +132,7 @@ def main(filename: str, export_path: Path, html_path: Path = None):
         for url in tqdm(urls, desc=f"{office}"):
             chrome_driver.get(url)
             extracted.append(extract(chrome_driver.page_source, office=office))
-            
+
             save_html(
                 chrome_driver.page_source,
                 export_path / "HTML_FILES",

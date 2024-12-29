@@ -4,7 +4,6 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
-import pandas
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -48,7 +47,13 @@ def extract_cards(page_source):
 def extract(page_source):
 
     soup = BeautifulSoup(page_source, "html.parser")
-    table = soup.find(string="Constitutional Votes").parent.next_sibling.next_sibling
+
+    keyphrase = soup.find(string="Constitutional Votes")
+
+    if keyphrase is None:
+        return {}
+
+    table = keyphrase.parent.next_sibling.next_sibling
 
     scores = [th.get_text(strip=True) for th in table.tbody.find_all("th")]
     session = [td.span.get_text(strip=True) for td in table.tbody.find_all("td")]

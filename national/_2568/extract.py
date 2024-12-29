@@ -90,7 +90,7 @@ def main(filename: str, export_path: Path, html_path: Path = None):
     chrome_service = Service()
     chrome_options = Options()
     chrome_options.add_argument("incognito")
-    # chrome_options.add_argument("headless")
+    chrome_options.add_argument("headless")
 
     # Allow the driver to return immediately without the DOM being loaded
     # Doing this allow the driver to inject some JS Script in
@@ -138,7 +138,7 @@ def main(filename: str, export_path: Path, html_path: Path = None):
         return document.querySelector('#scorecardContainer').shadowRoot
         """
         )
-        time.sleep(60)
+        time.sleep(5)
         
         page_source = shadowRoot.find_element(By.ID, "cards").get_attribute("innerHTML")
 

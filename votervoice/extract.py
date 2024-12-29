@@ -22,7 +22,7 @@ RATINGS_METHODOLOGY = {
     "Voted with us": "+",
     "Voted against us": "-",
     "No position": "*",
-    "vvSupportContainer":"+",
+    "vvSupportContainer": "+",
     "vvOpposeContainer": "-",
     "vvNeutralContainer": "*",
 }
@@ -40,7 +40,7 @@ def extract(page_source):
             title = td.span.get("title") if td.span else None
             class_ = td.span.get("class") if td.span else None
 
-            if (title is None or title not in RATINGS_METHODOLOGY):
+            if title is None or title not in RATINGS_METHODOLOGY:
                 for m in RATINGS_METHODOLOGY:
                     if class_ and m in class_:
                         rating_string += RATINGS_METHODOLOGY.get(m)
@@ -115,24 +115,25 @@ def main(url, export_path: Path):
     chrome_service = Service()
     chrome_options = Options()
     chrome_options.add_argument("incognito")
-    chrome_options.add_argument("headless")
+    # chrome_options.add_argument("headless")
     chrome_driver = webdriver.Chrome(service=chrome_service, options=chrome_options)
 
     chrome_driver.get(url)
 
     try:
-        WebDriverWait(chrome_driver, 10).until(
+        WebDriverWait(chrome_driver, 30).until(
             EC.visibility_of_all_elements_located(
-                (By.XPATH, '//table[@class="vvScorecardAggregate"]/tbody/tr')
+                (By.CSS_SELECTOR, "table.vvScorecardAggregate tbody tr")
             )
         )
     except TimeoutException:
         chrome_driver.quit()
-        return "Taking too long to load..."
+        print("Taking too long to load...")
+        return []
 
     offices = chrome_driver.find_elements(
         By.XPATH,
-        '//section[@id="vvConsolidatedScorecardResults"]//div[@class="vv-tab-menu-item-container"]',
+        "section#vvConsolidatedScorecardResults div.vv-tab-menu-item-container]",
     )
 
     extract_by_session = defaultdict(list)

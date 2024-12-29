@@ -91,7 +91,8 @@ def main():
 
         extracted_by_session = extract(args.url, args.export_path)
         sessions = list(extracted_by_session)
-
+        print(sessions)
+        
         for session in sessions:
             for year in args.years:
                 if session and session in extracted_by_session and str(year) in session:

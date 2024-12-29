@@ -193,8 +193,5 @@ def main(filename: str, export_path: Path, html_path: Path = None):
         old_state_results = state_results
         p_bar_second.update(1)
 
-
-    extracted = extract(chrome_driver.page_source)
     records_extracted = dict(enumerate(extracted))
-
     return records_extracted

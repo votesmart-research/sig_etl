@@ -79,7 +79,6 @@ def save_html(
     *additional_info,
 ):
 
-    filepath = filepath / "HTML_FILES"
     filepath.mkdir(exist_ok=True)
 
     soup = BeautifulSoup(page_source, "html.parser")

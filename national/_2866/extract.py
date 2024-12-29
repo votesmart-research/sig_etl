@@ -94,7 +94,7 @@ def main(
     html_path: Path = None,
 ):
 
-    if html_path:
+    if html_path is not None:
         html_files = filter(
             lambda f: f.name.endswith(".html"),
             (export_path / html_path).iterdir(),

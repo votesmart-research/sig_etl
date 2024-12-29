@@ -18,7 +18,7 @@ def match():
     pass
 
 
-FILENAME = f"_NA_"
+FILENAME = f"_NA_AFSCME"
 
 
 def save_records(
@@ -51,43 +51,24 @@ def main():
         "--export_path",
         type=Path,
         required=True,
-        help="filepath of the directory where files are exported to"
+        help="filepath of the directory where files are exported to",
     )
 
     parser.add_argument(
-        "-f",
-        "--file",
-        type=Path,
-        help="read extracted or transformed file"
+        "-f", "--file", type=Path, help="read extracted or transformed file"
     )
 
     parser.add_argument(
-        "-hp",
-        "--html_path",
-        type=Path,
-        help="filepath to HTML directory"
+        "-hp", "--html_path", type=Path, help="filepath to HTML directory"
     )
 
-    parser.add_argument(
-        "-e",
-        "--extract",
-        action="store_true",
-        help="to extract only"
-    )
+    parser.add_argument("-e", "--extract", action="store_true", help="to extract only")
 
     parser.add_argument(
-        "-t",
-        "--transform",
-        action="store_true",
-        help="to transform only"
+        "-t", "--transform", action="store_true", help="to transform only"
     )
 
-    parser.add_argument(
-        "-m",
-        "--match",
-        action="store_true",
-        help="to match only"
-    )
+    parser.add_argument("-m", "--match", action="store_true", help="to match only")
 
     args = parser.parse_args()
 

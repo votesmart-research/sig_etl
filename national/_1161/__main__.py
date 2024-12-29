@@ -62,6 +62,13 @@ def main():
     )
 
     parser.add_argument(
+        "-y",
+        "--year",
+        type=int,
+        help="Year of the ratings.",
+    )
+
+    parser.add_argument(
         "-hp",
         "--html_path",
         type=Path,
@@ -104,7 +111,7 @@ def main():
     if not any((args.extract, args.transform, args.match)):
 
         records_extracted = extract(
-            FILENAME + "Ratings", args.export_path, args.html_path
+            FILENAME + "Ratings", args.export_path, args.html_path, year=args.year
         )
         save_records(
             records_extracted,

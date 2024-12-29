@@ -95,26 +95,50 @@ def transform_split(df: pandas.DataFrame):
 def transform_name(series: pandas.Series):
 
     pat_nickname = r"[\"\'\(](?P<nickname>.*?)[\"\'\)]"
-    pat_suffix = r"(?P<suffix>[IVX][IVX]+$|[DJMS][rs][s]?[\.]?)"
-    pat_middlename = r"\s+(?P<middlename>[A-Z]\.)"
-
-    lambda_first_last = lambda x: (
-        re.sub(f"{pat_middlename}|{pat_nickname}|{pat_suffix}", "", x)
-        if isinstance(x, str)
-        else x
+    pat_suffix = (
+        r"\,?\s?(?P<suffix>(?:[IVX]{2,3}|Jr\.?|Sr\.?|Dr\.?|Mr\.?|Ms\.?|Mrs\.?)$)"
     )
+    pat_middlename = r"(?<![A-Z][a-z]\.)|(?:\s)(?P<middlename>(?:[A-Z]{1}\.?))(?=\s|$)"
+
+    def clean_name(name):
+        name = re.sub(pat_nickname, "", name)
+        # Replace suffix before middlename because it succeeds middlename
+        name = re.sub(pat_suffix, "", name)
+        name = re.sub(pat_middlename, "", name)
+        return name.strip()
+
     series = series.apply(unidecode)
 
-    series_first_last = series.apply(lambda_first_last)
-    series_firstname = series_first_last.apply(lambda x: " ".join(x.split()[0:-1]))
-    series_lastname = series_first_last.apply(lambda x: x.split()[-1])
-    df_othernames = series.str.extract(f"{pat_nickname}|{pat_suffix}|{pat_middlename}")
+    series_first_last = series.apply(clean_name)
+
+    rows_w_comma = series_first_last.apply(lambda x: "," in x)
+
+    series_firstname = series_first_last[~rows_w_comma].apply(
+        lambda x: " ".join(x.split()[0:-1])
+    )
+    series_lastname = series_first_last[~rows_w_comma].apply(lambda x: x.split()[-1])
+
+    series_comma_lastname = series_first_last[rows_w_comma].apply(
+        lambda x: x.split(",")[0]
+    )
+    series_comma_firstname = series_first_last[rows_w_comma].apply(
+        lambda x: x.split(",")[-1]
+    )
+
+    combined_firstname = series_firstname.combine_first(series_comma_firstname)
+    combined_lastname = series_lastname.combine_first(series_comma_lastname)
+
+    df_nickname = series.str.extract(pat_nickname)
+    df_suffix = series.str.extract(pat_suffix)
+    df_middlename = series.str.extract(pat_middlename)
 
     return pandas.concat(
         [
-            series_firstname.rename("firstname"),
-            series_lastname.rename("lastname"),
-            df_othernames,
+            combined_firstname.rename("firstname"),
+            combined_lastname.rename("lastname"),
+            df_nickname,
+            df_suffix,
+            df_middlename,
         ],
         axis=1,
     )

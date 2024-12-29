@@ -23,14 +23,12 @@ def extract(page_source, **additional_info):
 
     def extract_table(table):
 
-        headers = [th.get_text(strip=True) for th in table.thead.find_all("th")]
-        rows = [tr.find_all("td") for tr in table.tbody.find_all("tr")]
-
-        def get_text(x):
-            return x.get_text(strip=True)
+        headers = [th.get_text(strip=True) for th in table.select("thead th")]
+        rows = [tr.select("td") for tr in table.select("tbody tr")]
 
         return [
-            dict(zip(headers, map(get_text, row))) | additional_info for row in rows
+            dict(zip(headers, [c.get_text(strip=True) for c in row])) | additional_info
+            for row in rows
         ]
 
     return extract_table(table)
@@ -75,15 +73,15 @@ def save_html(
 
 def main(filename: str, export_path: Path, html_path: Path = None):
 
-    # if html_path:
-    #     html_files = filter(
-    #         lambda f: f.name.endswith(".html"),
-    #         (export_path / html_path).iterdir(),
-    #     )
-    #     records_extracted = extract_files(
-    #         sorted(html_files, key=lambda x: x.stat().st_ctime)
-    #     )
-    #     return records_extracted
+    if html_path:
+        html_files = filter(
+            lambda f: f.name.endswith(".html"),
+            (export_path / html_path).iterdir(),
+        )
+        records_extracted = extract_files(
+            sorted(html_files, key=lambda x: x.stat().st_ctime)
+        )
+        return records_extracted
 
     chrome_service = Service()
     chrome_options = Options()

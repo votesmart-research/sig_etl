@@ -1,6 +1,7 @@
 import re
 import time
 from datetime import datetime
+from collections import defaultdict
 from pathlib import Path
 
 from bs4 import BeautifulSoup
@@ -22,14 +23,15 @@ URL = "https://climatecabinet.org/climate-scores"
 def extract_card(page_source, **additional_info):
 
     soup = BeautifulSoup(page_source, "html.parser")
-    card = soup.find("div", {"data-testid": "spotlight--0"})
+    card = soup.select_one("div[data-testid=spotlight--0]")
 
     office = card.find("div", {"class": "_retool-container-spotlight_office"})
     party = card.find("div", {"class": "_retool-container-spotlight_party"})
+    party_text = party.select_one("div[class*=_text]")
 
     return {
         "Chamber_dist": office.get_text(strip=True) if office else None,
-        "Party_long": party.get_text(strip=True) if party else None,
+        "Party_long": party_text.get_text(strip=True) if party_text else None,
     } | additional_info
 
 
@@ -37,16 +39,11 @@ def extract_table(page_source, **additional_info):
 
     soup = BeautifulSoup(page_source, "html.parser")
 
-    header_container = soup.find("div", {"role": "rowheader"})
-    row_container = soup.find("ol")
-
-    header_divs = [
-        div for div in header_container.find_all("div", {"role": "gridcell"})
-    ]
-    row_lis = row_container.find_all("li")
+    header_containers = [div for div in soup.select("div[role=columnheader]")]
 
     headers = []
-    for header in header_divs:
+
+    for header in header_containers:
         col = header.find(
             lambda tag: tag.name == "span"
             and tag.has_attr("data-testid")
@@ -55,14 +52,14 @@ def extract_table(page_source, **additional_info):
 
         headers.append(col.get_text(strip=True))
 
+    row_container = soup.select_one("div[role=rowgroup]")
+    rows = row_container.select("div[role=row]")
+
     extracted = {}
 
-    for row in row_lis:
-        row_index = row.get("data-item-index")
-        columns = [
-            col.get_text(strip=True)
-            for col in row.find_all("div", {"role": "gridcell"})
-        ]
+    for row in rows:
+        row_index = str(row.get("data-item-index"))
+        columns = [col.get_text(strip=True) for col in row.select("div[role=gridcell]")]
         extracted[row_index] = dict(zip(headers, columns)) | additional_info
 
     return extracted
@@ -70,15 +67,40 @@ def extract_table(page_source, **additional_info):
 
 def extract_files(files: list[Path]):
 
-    extracted = []
+    extracted = defaultdict(dict)
 
-    for file in files:
+    for file in tqdm(files, "Extracting files..."):
 
         with open(file, "r") as f:
-            extracted += extract_card(f.read())
+            html = f.read()
+            soup = BeautifulSoup(html, "html.parser")
 
-    records_extracted = dict(enumerate(extracted))
+            selected_state = soup.select_one("input[id*=state_select]")
+            selected_row = soup.select_one("div[role=row][aria-selected=true]")
 
+            row_index = str(selected_row.get("data-item-index"))
+            state_text = selected_state.get("value")
+
+            # added = []
+
+            for i, _e in extract_table(html).items():
+                if i not in extracted[state_text]:
+                    # added.append(_e)
+                    extracted[state_text].update({i: _e})
+
+            # card_extraction = extract_card(html)
+
+            extracted[state_text][row_index].update(extract_card(html))
+
+    rearranged_e = []
+
+    for state, d in extracted.items():
+        for i, _d in d.items():
+            rearranged_e.append(
+                _d | {"state": state, "row_index": i},
+            )
+
+    records_extracted = dict(enumerate(rearranged_e))
     return records_extracted
 
 
@@ -169,18 +191,18 @@ def scroll_states(driver, func=None):
     return extracted
 
 
-def scroll_candidates(driver, state, save_html=None):
+def scroll_candidates(driver: webdriver.Chrome, state, save_html=None):
 
-    table_script = """
-        return document.getElementById("scores--0")
-        """
+    table = driver.find_element(By.CSS_SELECTOR, "div#scores--0")
+    table_footer = table.find_element(By.CSS_SELECTOR, "div[data-is-footer=true]")
+    footer_text = re.findall("\\d+", table_footer.text if table_footer else "")
+    total_results = int(footer_text.pop()) if footer_text else 0
 
-    table_footer_script = """
-        return arguments[0].querySelector("div[data-is-footer=true]")
-    """
-    table_selected_row_script = """
-        return arguments[0].querySelector("ol > li[aria-selected=true]")
-    """
+    progress_bar_candidates = tqdm(total=total_results, desc="Extracting Candidates...")
+
+    extracted = {}
+    extracted_cards = {}
+    selected_rows = []
 
     table_scroll_script = """
         event = new KeyboardEvent('keydown', {
@@ -190,29 +212,23 @@ def scroll_candidates(driver, state, save_html=None):
         arguments[0].dispatchEvent(event)                    
         """
 
-    table = driver.execute_script(table_script)
-    table_footer = driver.execute_script(table_footer_script, table)
-
-    footer_text = re.findall("\\d+", table_footer.text if table_footer else "")
-    total_results = int(footer_text.pop()) if footer_text else 0
-
-    progress_bar_candidates = tqdm(total=total_results, desc="Extracting Candidates...")
-
-    extracted = extract_table(table.get_attribute("outerHTML"))
-    extracted_cards = {"0": extract_card(driver.page_source)}
-
-    if save_html:
-        save_html(driver, state)
-
-    selected_rows = []
-
-    progress_bar_candidates.update(1)
-
     while True:
-        driver.execute_script(table_scroll_script, table)
         time.sleep(1)
 
-        currently_selected = driver.execute_script(table_selected_row_script, table)
+        try:
+            WebDriverWait(driver, 10).until(
+                EC.none_of(
+                    EC.visibility_of_element_located(
+                        (By.CSS_SELECTOR, "div[class*='_loadingMask']")
+                    )
+                )
+            )
+        except TimeoutException:
+            print("Loading card take too long...")
+
+        currently_selected = table.find_element(
+            By.CSS_SELECTOR, "div[role=row][aria-selected=true]"
+        )
         row_num = currently_selected.get_attribute("data-item-index")
 
         if row_num in selected_rows:
@@ -223,9 +239,11 @@ def scroll_candidates(driver, state, save_html=None):
 
         extracted.update(extract_table(table.get_attribute("outerHTML"), state=state))
         extracted_cards.update({row_num: extract_card(driver.page_source)})
-
         selected_rows.append(row_num)
+
         progress_bar_candidates.update(1)
+
+        driver.execute_script(table_scroll_script, table)
 
     for i, card_record in extracted_cards.items():
         if i in extracted:
@@ -241,15 +259,13 @@ def main(filename: str, export_path: Path, html_path: Path = None):
             lambda f: f.name.endswith(".html"),
             (export_path / html_path).iterdir(),
         )
-        records_extracted = extract_files(
-            sorted(html_files, key=lambda x: x.stat().st_ctime)
-        )
+        records_extracted = extract_files(sorted(html_files))
         return records_extracted
 
     chrome_service = Service()
     chrome_options = Options()
     chrome_options.add_argument("incognito")
-    # chrome_options.add_argument("headless")
+    chrome_options.add_argument("headless")
     chrome_driver = webdriver.Chrome(service=chrome_service, options=chrome_options)
 
     chrome_driver.get(URL)
@@ -280,4 +296,3 @@ def main(filename: str, export_path: Path, html_path: Path = None):
     )
 
     return dict(enumerate(extracted))
-    # return {0: []}

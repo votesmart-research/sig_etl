@@ -12,12 +12,14 @@ VALUES_TO_REPLACE = {
 
 def get_name(series: pandas.Series):
     pat_title_name = r"\s\([^)]*\)"
-    pat_suffix = r"(?P<suffix>[IVX][IVX]+$|[DJMS][rs][s]?[\.]+|[M]\.?\s?[D]\.?\s?)"
+    pat_suffix = (
+        r"\,?\s?(?P<suffix>(?:[IVX]{2,3}|Jr\.?|Sr\.?|Dr\.?|Mr\.?|Ms\.?|Mrs\.?|M\.?\s?D\.?)$)"
+    )
     pat_middlename = r"\s+(?P<middlename>[A-Z]\.)"
     titles = [
         r"^Rep.\s",
         r"^Sen.\s",
-        r"^Minority Leader\s",
+        r"^Minority Leader\s",  
         r"^Majority Leader\s",
         r"^Resident Commissioner\s",
         r"^Speaker\s",
@@ -84,7 +86,7 @@ def main(records_extracted):
     )
 
     df_transformed.replace(VALUES_TO_REPLACE, inplace=True)
-    df_transformed.replace(numpy.NaN, "", inplace=True)
+    df_transformed.replace(numpy.nan, "", inplace=True)
 
     records_transformed = df_transformed.to_dict(orient="index")
 

@@ -2,7 +2,6 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-import pandas
 from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -96,7 +95,12 @@ def save_html(
         f.write(str(soup))
 
 
-def main(export_dir, year=None):
+def main(
+    filename: str,
+    export_path: Path,
+    html_path: Path = None,
+    year: list[str] = None,
+):
 
     chrome_service = Service()
     chrome_options = Options()
@@ -143,7 +147,8 @@ def main(export_dir, year=None):
             extracted += extract(chrome_driver.page_source, office=offices[i].text)
             save_html(
                 chrome_driver.page_source,
-                export_dir,
+                export_path / "HTML_FILES",
+                filename,
                 offices[i].text,
                 get_current_page(chrome_driver.page_source),
             )

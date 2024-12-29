@@ -196,8 +196,8 @@ def main(
         WebDriverWait(chrome_driver, 10).until(
             EC.presence_of_element_located(
                 (
-                    By.XPATH,
-                    "//div[@id='legislators-container']//div[@class='pure-g legislator-list']",
+                    By.CSS_SELECTOR,
+                    "div#legislators-container div.legislator-list",
                 )
             )
         )
@@ -210,7 +210,7 @@ def main(
     while True:
         try:
             pagination = chrome_driver.find_element(
-                By.XPATH, "//div[@class='pagination pure-u-md-1 pure-u-lg-3-4']"
+                By.CSS_SELECTOR, "div#scorecard-app div.pagination"
             )
             pagination.click()
 

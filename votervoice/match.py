@@ -119,7 +119,7 @@ def main(records_transformed: dict[int, dict[str, str]], years):
         query_incumbents,
         conn,
         start_date=f"{min(years)}-01-03",
-        end_date=f"{max(years)}-01-03",
+        end_date=f"{max(years)+1}-01-03",
         office_ids=list(office_ids),
         state_ids=list(state_ids),
         state_names=[],
